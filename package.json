@@ -1,0 +1,228 @@
+{
+    "name":  "auto-cmake-flash",
+    "displayName":  "Auto CMake Flash (STM32)",
+    "description":  "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录与校验一体化工具（第一版仅支持 STM32）",
+    "version": "0.3.3",
+    "publisher":  "acflash",
+    "license":  "MIT",
+    "private":  true,
+    "engines":  {
+                    "vscode":  "^1.85.0",
+                    "node":  "\u003e=18"
+                },
+    "categories":  [
+                       "Other",
+                       "Embedded"
+                   ],
+    "keywords":  [
+                     "STM32",
+                     "CMake",
+                     "ST-LINK",
+                     "embedded",
+                     "STM32CubeCLT"
+                 ],
+    "activationEvents":  [
+                             "onStartupFinished"
+                         ],
+    "main":  "./out/src/extension.js",
+    "contributes":  {
+                        "viewsContainers":  {
+                                                "activitybar":  [
+                                                                    {
+                                                                        "id":  "auto-cmake-flash",
+                                                                        "title":  "Auto CMake Flash",
+                                                                        "icon":  "resources/auto-cmake-flash.svg"
+                                                                    }
+                                                                ]
+                                            },
+                        "views":  {
+                                      "auto-cmake-flash":  [
+                                                               {
+                                                                   "id":  "autoCmakeFlash.project",
+                                                                   "name":  "工程与环境"
+                                                               }
+                                                           ]
+                                  },
+                        "commands":  [
+                                         {
+                                             "command":  "autoCmakeFlash.chooseProject",
+                                             "title":  "Auto CMake Flash: 选择要编译/烧录的工程",
+                                             "icon":  "$(folder)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.scanProject",
+                                             "title":  "Auto CMake Flash: 扫描工程与环境",
+                                             "icon":  "$(refresh)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.detectEnvironment",
+                                             "title":  "Auto CMake Flash: 检测开发环境",
+                                             "icon":  "$(tools)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.detectStLink",
+                                             "title":  "Auto CMake Flash: 检测 ST-LINK 连接",
+                                             "icon":  "$(plug)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.configureCMake",
+                                             "title":  "Auto CMake Flash: 配置 CMake",
+                                             "icon":  "$(settings-gear)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.build",
+                                             "title":  "Auto CMake Flash: 编译工程",
+                                             "icon":  "$(build)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.rebuild",
+                                             "title":  "Auto CMake Flash: 重新配置并编译",
+                                             "icon":  "$(debug-restart)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.buildAndFlash",
+                                             "title":  "Auto CMake Flash: 编译并烧录",
+                                             "icon":  "$(cloud-upload)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.flashExisting",
+                                             "title":  "Auto CMake Flash: 烧录现有固件",
+                                             "icon":  "$(rocket)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.clean",
+                                             "title":  "Auto CMake Flash: 清理插件构建目录",
+                                             "icon":  "$(trash)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.openBuildDir",
+                                             "title":  "Auto CMake Flash: 打开构建目录",
+                                             "icon":  "$(folder-opened)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.showArtifacts",
+                                             "title":  "Auto CMake Flash: 显示构建产物信息",
+                                             "icon":  "$(file-binary)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.revealElf",
+                                             "title":  "Auto CMake Flash: 定位 ELF 文件",
+                                             "icon":  "$(search)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.chooseMcu",
+                                             "title":  "Auto CMake Flash: 手动选择芯片型号",
+                                             "icon":  "$(chip)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.showLogs",
+                                             "title":  "Auto CMake Flash: 查看日志",
+                                             "icon":  "$(output)"
+                                         },
+                                         {
+                                             "command":  "autoCmakeFlash.openSettings",
+                                             "title":  "Auto CMake Flash: 打开设置",
+                                             "icon":  "$(gear)"
+                                         }
+                                     ],
+                        "menus":  {
+                                      "view/title":  [
+                                                         {
+                                                             "command":  "autoCmakeFlash.scanProject",
+                                                             "group":  "navigation@1",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.detectEnvironment",
+                                                             "group":  "navigation@2",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.build",
+                                                             "group":  "navigation@3",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.buildAndFlash",
+                                                             "group":  "navigation@4",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.showLogs",
+                                                             "group":  "overflow@1",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.openSettings",
+                                                             "group":  "overflow@2",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         }
+                                                     ],
+                                      "commandPalette":  [
+                                                             {
+                                                                 "command":  "autoCmakeFlash.scanProject"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.detectEnvironment"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.detectStLink"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.configureCMake"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.build"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.rebuild"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.buildAndFlash"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.flashExisting"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.clean"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.openBuildDir"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.showArtifacts"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.revealElf"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.chooseMcu"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.showLogs"
+                                                             },
+                                                             {
+                                                                 "command":  "autoCmakeFlash.openSettings"
+                                                             }
+                                                         ]
+                                  }
+                    },
+    "scripts":  {
+                    "vscode:prepublish": "echo skip: out prebuilt",
+                    "compile":  "tsc -p ./",
+                    "watch":  "tsc -w -p ./",
+                    "test":  "npm run compile \u0026\u0026 node --test \"out/test/**/*.test.js\"",
+                    "package":  "vsce package --allow-missing-repository --no-dependencies"
+                },
+    "devDependencies":  {
+                            "@types/node":  "^20.12.7",
+                            "@types/vscode":  "^1.85.0",
+                            "@vscode/vsce":  "^3.1.0",
+                            "typescript":  "^5.4.5"
+                        },
+    "__metadata":  {
+                       "installedTimestamp":  1792759059103,
+                       "targetPlatform":  "undefined",
+                       "size":  217738
+                   }
+}

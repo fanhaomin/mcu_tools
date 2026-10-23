@@ -1,0 +1,354 @@
+"use strict";
+/**
+ * 侧边栏 TreeView：工程 / 开发环境 / 构建 / 烧录 四个分区。
+ * 图标统一用 ThemeIcon（label 内不出现 $(codicon) 文字），行文案精简，详细数据放 tooltip。
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    if (k2 in o) Object.defineProperty(o, k2, { enumerable: true, value: o[k2] });
+    else o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SidebarProvider = void 0;
+exports.flashStatusText = flashStatusText;
+exports.verifyText = verifyText;
+const vscode = __importStar(require("vscode"));
+const TOOL_SHORT = {
+    cmake: 'CMake',
+    ninja: 'Ninja',
+    armGcc: 'GCC',
+    armGpp: 'G++',
+    objcopy: 'ObjCopy',
+    size: 'Size',
+    programmerCli: 'CubeProg',
+};
+const CORE_TOOLS = ['cmake', 'ninja', 'armGcc', 'programmerCli'];
+class SidebarProvider {
+    state;
+    _onDidChangeTreeData = new vscode.EventEmitter();
+    onDidChangeTreeData = this._onDidChangeTreeData.event;
+    constructor(state) {
+        this.state = state;
+    }
+    refresh() {
+        this._onDidChangeTreeData.fire(undefined);
+    }
+    getTreeItem(element) {
+        return element;
+    }
+    getChildren(element) {
+        if (!element) {
+            return [
+                this.section('工程', 'section-project', 'library'),
+                this.section('开发环境', 'section-env', 'tools'),
+                this.section('构建', 'section-build', 'build'),
+                this.section('烧录', 'section-flash', 'cloud-upload'),
+            ];
+        }
+        const s = this.state();
+        switch (element.contextValue) {
+            case 'section-project':
+                return this.projectRows(s);
+            case 'section-env':
+                return this.envRows(s);
+            case 'section-build':
+                return this.buildRows(s);
+            case 'section-flash':
+                return this.flashRows(s);
+            default:
+                return [];
+        }
+    }
+    section(label, contextValue, icon) {
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
+        item.contextValue = contextValue;
+        item.iconPath = new vscode.ThemeIcon(icon);
+        return item;
+    }
+    row(label, opts = {}) {
+        const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+        if (opts.icon) {
+            item.iconPath = new vscode.ThemeIcon(opts.icon);
+        }
+        if (opts.command) {
+            item.command = {
+                command: opts.command,
+                title: opts.commandTitle ?? label,
+            };
+        }
+        item.tooltip = opts.tooltip;
+        item.contextValue = opts.contextValue;
+        return item;
+    }
+    projectRows(s) {
+        const rows = [];
+        const p = s.project;
+        if (!p) {
+            rows.push(this.row('未扫描工程（点击扫描）', {
+                icon: 'search',
+                command: 'autoCmakeFlash.scanProject',
+                commandTitle: '扫描工程',
+                tooltip: '扫描当前工作区，识别 STM32 工程结构',
+            }));
+            return rows;
+        }
+        const conf = `${confidenceLabel(p.mcu.confidence)}${p.mcu.confirmedByUser ? '（用户确认）' : ''}`;
+        const tipParts = [`工程路径: ${p.root}`, `可信度: ${conf}`];
+        if (p.mcu.evidence.length > 0) {
+            tipParts.push('识别证据:', ...p.mcu.evidence.map((e) => `${e.source}: ${e.detail}`));
+        }
+        rows.push(this.row(`${p.name} — ${p.mcu.model || '型号待确认'}`, {
+            icon: 'folder-active',
+            command: 'autoCmakeFlash.scanProject',
+            commandTitle: '重新扫描',
+            tooltip: tipParts.join('\n'),
+        }));
+        const marks = [
+            `CMakeLists ${p.hasCMakeLists ? '✔' : '✘'}`,
+            `.ioc ${p.hasIoc ? '✔' : '✘'}`,
+            `HAL ${p.hasHalDriver ? '✔' : '✘'}`,
+        ];
+        const missing = [];
+        if (!p.hasCMakeLists) {
+            missing.push('CMakeLists.txt');
+        }
+        if (!p.hasIoc) {
+            missing.push('.ioc');
+        }
+        if (!p.hasHalDriver) {
+            missing.push('HAL');
+        }
+        const ok = missing.length === 0;
+        const fileTip = [
+            p.cmakeListsPath ? `CMakeLists.txt: ${p.cmakeListsPath}` : 'CMakeLists.txt: 未找到',
+            p.iocPath ? `.ioc: ${p.iocPath}` : '.ioc: 未找到',
+            `CMSIS ${p.hasCmsis ? '✔' : '✘'}，启动文件 ${p.startupFiles.length} 个，链接脚本 ${p.linkerScripts.length} 个`,
+        ].join('\n');
+        rows.push(this.row(ok
+            ? `工程文件: 就绪（${marks.join(' ')}）`
+            : `工程文件: 缺 ${missing.join('、')}（${marks.join(' ')}）`, {
+            icon: ok ? 'check' : 'warning',
+            tooltip: fileTip,
+        }));
+        if (p.warnings.length > 0) {
+            rows.push(this.row(`识别警告（${p.warnings.length}）`, {
+                icon: 'warning',
+                command: 'autoCmakeFlash.showWarnings',
+                commandTitle: '查看识别警告',
+                tooltip: p.warnings.join('\n'),
+            }));
+        }
+        return rows;
+    }
+    envRows(s) {
+        const rows = [];
+        const tc = s.toolchain;
+        if (!tc) {
+            rows.push(this.row('工具链: 未检测', {
+                icon: 'tools',
+                command: 'autoCmakeFlash.detectEnvironment',
+                commandTitle: '检测开发环境',
+                tooltip: '检测 CMake/Ninja/ARM GCC/STM32CubeProgrammer CLI',
+            }));
+        }
+        else if (tc.complete) {
+            rows.push(this.row('工具链: 就绪（CMake/Ninja/GCC/CubeProg）', {
+                icon: 'check',
+                command: 'autoCmakeFlash.detectEnvironment',
+                commandTitle: '重新检测',
+                tooltip: CORE_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
+            }));
+        }
+        else {
+            rows.push(this.row(`工具链: 缺 ${tc.missing.map((n) => TOOL_SHORT[n] ?? n).join('/')}`, {
+                icon: 'warning',
+                command: 'autoCmakeFlash.showMissingTools',
+                commandTitle: '查看解决方法',
+                tooltip: CORE_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
+            }));
+        }
+        const st = s.stlink;
+        if (!st) {
+            rows.push(this.row('ST-LINK: 未检测', {
+                icon: 'plug',
+                command: 'autoCmakeFlash.detectStLink',
+                commandTitle: '检测 ST-LINK',
+            }));
+        }
+        else if (st.status === 'probeDetected') {
+            rows.push(this.row(`ST-LINK: 已检测到 ${st.probeCount} 个探头`, {
+                icon: 'plug',
+                command: 'autoCmakeFlash.detectStLink',
+                commandTitle: '检测 ST-LINK',
+                tooltip: st.probes.map((p) => `SN: ${p.serial ?? '?'}`).join('\n') || undefined,
+            }));
+        }
+        else {
+            const text = st.status === 'noProbe'
+                ? 'ST-LINK: 未检测到适配器'
+                : st.status === 'cliMissing'
+                    ? 'ST-LINK: CLI 未找到，无法检测'
+                    : 'ST-LINK: 检测结果未知';
+            rows.push(this.row(text, {
+                icon: 'warning',
+                command: 'autoCmakeFlash.detectStLink',
+                commandTitle: '重试检测',
+                tooltip: st.error ?? undefined,
+            }));
+        }
+        return rows;
+    }
+    buildRows(s) {
+        const rows = [];
+        const b = s.lastBuild;
+        if (b?.success) {
+            rows.push(this.row(`最近编译: 成功 (${(b.durationMs / 1000).toFixed(1)}s)`, {
+                icon: 'check',
+                command: 'autoCmakeFlash.showArtifacts',
+                commandTitle: '查看产物',
+                tooltip: `构建模式 ${b.buildType}，退出码 ${b.exitCode}`,
+            }));
+        }
+        else if (b) {
+            rows.push(this.row(`最近编译: 失败（退出码 ${b.exitCode ?? '?'}${b.cancelled ? '，已取消' : ''}）`, {
+                icon: 'warning',
+                command: 'autoCmakeFlash.showLogs',
+                commandTitle: '查看日志',
+                tooltip: '点击查看日志与问题面板',
+            }));
+        }
+        const count = s.project?.artifacts.length ?? 0;
+        rows.push(this.row(`构建产物: ${count} 个`, {
+            icon: 'file-binary',
+            command: 'autoCmakeFlash.showArtifacts',
+            commandTitle: '查看构建产物',
+            tooltip: 'ELF/HEX/BIN 文件列表',
+        }));
+        rows.push(this.row('打开构建目录', {
+            icon: 'folder-opened',
+            command: 'autoCmakeFlash.openBuildDir',
+            commandTitle: '打开构建目录',
+        }));
+        rows.push(this.row('清理构建目录', {
+            icon: 'trash',
+            command: 'autoCmakeFlash.clean',
+            commandTitle: '清理构建目录',
+        }));
+        return rows;
+    }
+    flashRows(s) {
+        const rows = [];
+        const f = s.lastFlash;
+        if (f) {
+            const ok = f.status === 'success';
+            const tipParts = [`下载: ${f.downloaded ? '成功' : '失败'} / 校验: ${verifyText(f.verify)}`];
+            if (f.messages.length > 0) {
+                tipParts.push(...f.messages);
+            }
+            rows.push(this.row(`最近烧录: ${ok ? '成功' : flashStatusText(f)}`, {
+                icon: ok ? 'check' : 'warning',
+                command: 'autoCmakeFlash.showLogs',
+                commandTitle: '查看日志',
+                tooltip: tipParts.join('\n'),
+            }));
+        }
+        rows.push(this.row('编译并烧录', {
+            icon: 'cloud-upload',
+            command: 'autoCmakeFlash.buildAndFlash',
+            commandTitle: '编译并烧录',
+        }));
+        rows.push(this.row('烧录现有固件', {
+            icon: 'rocket',
+            command: 'autoCmakeFlash.flashExisting',
+            commandTitle: '烧录现有固件',
+        }));
+        return rows;
+    }
+}
+exports.SidebarProvider = SidebarProvider;
+function confidenceLabel(c) {
+    switch (c) {
+        case 'high':
+            return '高';
+        case 'medium':
+            return '中';
+        case 'low':
+            return '低';
+        default:
+            return '无法判断';
+    }
+}
+function toolTooltip(t, short) {
+    if (t.found) {
+        return `${short}: ${t.version ?? '版本未知'}\n${t.path ?? ''}${t.error ? `\n注意: ${t.error}` : ''}`;
+    }
+    return `${short}: 未找到 — ${t.error ?? '原因未知'}`;
+}
+function flashStatusText(f) {
+    switch (f.status) {
+        case 'success':
+            return '成功（下载与校验通过）';
+        case 'reset-failed':
+            return '下载校验通过，但复位失败';
+        case 'verify-unconfirmed':
+            return '下载完成，校验状态未确认';
+        case 'verify-failed':
+            return '校验失败';
+        case 'download-failed':
+            return '下载失败';
+        case 'connect-failed':
+            return '目标芯片无法连接';
+        case 'no-probe':
+            return '未检测到 ST-LINK';
+        case 'blocked':
+            return '前置条件不满足，已阻止';
+        case 'cancelled':
+            return '用户取消';
+        default:
+            return f.status;
+    }
+}
+function verifyText(v) {
+    switch (v) {
+        case 'passed':
+            return '通过';
+        case 'failed':
+            return '失败';
+        case 'unconfirmed':
+            return '未确认';
+        case 'skipped':
+            return '未执行';
+        default:
+            return v;
+    }
+}
+//# sourceMappingURL=sidebar.js.map
