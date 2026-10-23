@@ -72,7 +72,7 @@
                                          {
                                              "command":  "autoCmakeFlash.build",
                                              "title":  "Auto CMake Flash: 编译工程",
-                                             "icon":  "$(build)"
+                                             "icon":  "$(zap)"
                                          },
                                          {
                                              "command":  "autoCmakeFlash.rebuild",
@@ -82,7 +82,7 @@
                                          {
                                              "command":  "autoCmakeFlash.buildAndFlash",
                                              "title":  "Auto CMake Flash: 编译并烧录",
-                                             "icon":  "$(cloud-upload)"
+                                             "icon":  "$(rocket)"
                                          },
                                          {
                                              "command":  "autoCmakeFlash.flashExisting",
@@ -128,33 +128,33 @@
                         "menus":  {
                                       "view/title":  [
                                                          {
-                                                             "command":  "autoCmakeFlash.scanProject",
+                                                             "command":  "autoCmakeFlash.build",
                                                              "group":  "navigation@1",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          },
                                                          {
-                                                             "command":  "autoCmakeFlash.detectEnvironment",
+                                                             "command":  "autoCmakeFlash.buildAndFlash",
                                                              "group":  "navigation@2",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          },
                                                          {
-                                                             "command":  "autoCmakeFlash.build",
-                                                             "group":  "navigation@3",
-                                                             "when":  "view == autoCmakeFlash.project"
-                                                         },
-                                                         {
-                                                             "command":  "autoCmakeFlash.buildAndFlash",
-                                                             "group":  "navigation@4",
-                                                             "when":  "view == autoCmakeFlash.project"
-                                                         },
-                                                         {
-                                                             "command":  "autoCmakeFlash.showLogs",
+                                                             "command":  "autoCmakeFlash.scanProject",
                                                              "group":  "overflow@1",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          },
                                                          {
-                                                             "command":  "autoCmakeFlash.openSettings",
+                                                             "command":  "autoCmakeFlash.detectEnvironment",
                                                              "group":  "overflow@2",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.showLogs",
+                                                             "group":  "overflow@3",
+                                                             "when":  "view == autoCmakeFlash.project"
+                                                         },
+                                                         {
+                                                             "command":  "autoCmakeFlash.openSettings",
+                                                             "group":  "overflow@4",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          }
                                                      ],
