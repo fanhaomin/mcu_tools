@@ -139,22 +139,17 @@
                                                          },
                                                          {
                                                              "command":  "autoCmakeFlash.scanProject",
-                                                             "group":  "overflow@1",
-                                                             "when":  "view == autoCmakeFlash.project"
-                                                         },
-                                                         {
-                                                             "command":  "autoCmakeFlash.detectEnvironment",
-                                                             "group":  "overflow@2",
+                                                             "group":  "navigation@3",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          },
                                                          {
                                                              "command":  "autoCmakeFlash.showLogs",
-                                                             "group":  "overflow@3",
+                                                             "group":  "overflow@1",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          },
                                                          {
                                                              "command":  "autoCmakeFlash.openSettings",
-                                                             "group":  "overflow@4",
+                                                             "group":  "overflow@2",
                                                              "when":  "view == autoCmakeFlash.project"
                                                          }
                                                      ],

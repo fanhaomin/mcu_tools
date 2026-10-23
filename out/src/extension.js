@@ -808,7 +808,11 @@ function init(context) {
     register('autoCmakeFlash.scanProject', async () => {
         const root = await pickRoot();
         if (root) {
-            await doScan(root, false);
+            // 刷新 = 工程识别 + 开发环境/ST-LINK 检测 一次完成（静默，汇总不再弹窗）
+            await doScan(root, true);
+            await doDetectEnvironment(root, true);
+            refresh();
+            log('已刷新工程与环境信息');
         }
     });
     register('autoCmakeFlash.detectEnvironment', async () => {
