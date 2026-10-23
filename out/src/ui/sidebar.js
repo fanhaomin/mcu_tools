@@ -229,6 +229,12 @@ class SidebarProvider {
     }
     buildRows(s) {
         const rows = [];
+        rows.push(this.row(`编译`, {
+            icon: 'play',
+            command: 'autoCmakeFlash.build',
+            commandTitle: '编译',
+            tooltip: '编译当前选中目标',
+        }));
         const b = s.lastBuild;
         if (b?.success) {
             rows.push(this.row(`最近编译: 成功 (${(b.durationMs / 1000).toFixed(1)}s)`, {
