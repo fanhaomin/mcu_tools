@@ -39,14 +39,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StatusBar = void 0;
 const vscode = __importStar(require("vscode"));
 class StatusBar {
-    item;
     buildBtn;
     flashBtn;
     projectBtn;
     constructor() {
-        this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 60);
-        this.item.name = 'Auto CMake Flash';
-        this.item.command = 'auto-cmake-flash.focus';
         // 状态栏左侧快捷按钮：编译 / 烧录（一键执行，无需打开插件面板）
         this.buildBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 62);
         this.buildBtn.name = 'Auto CMake Flash 编译';
@@ -65,47 +61,6 @@ class StatusBar {
         this.update({ busy: 'none' });
     }
     update(state) {
-        const item = this.item;
-        if (state.busy === 'build') {
-            item.text = '$(sync~spin) ACF 编译中...';
-            item.tooltip = 'Auto CMake Flash 正在编译，可在输出面板查看进度';
-        }
-        else if (state.busy === 'flash') {
-            item.text = '$(sync~spin) ACF 烧录中...';
-            item.tooltip = 'Auto CMake Flash 正在烧录';
-        }
-        else if (state.busy === 'configure') {
-            item.text = '$(sync~spin) ACF 配置中...';
-            item.tooltip = 'Auto CMake Flash 正在执行 CMake 配置';
-        }
-        else if (state.lastFlash) {
-            if (state.lastFlash.status === 'success') {
-                item.text = '$(check) ACF 烧录成功';
-                item.tooltip = `最近烧录: 下载成功，校验${state.lastFlash.verify === 'passed' ? '通过' : '未确认'}`;
-            }
-            else if (state.lastFlash.verify === 'unconfirmed' && state.lastFlash.downloaded) {
-                item.text = '$(question) ACF 校验未确认';
-                item.tooltip = '下载完成但校验状态未确认，请查看日志';
-            }
-            else {
-                item.text = '$(error) ACF 烧录异常';
-                item.tooltip = `最近烧录状态: ${state.lastFlash.status}`;
-            }
-        }
-        else if (state.lastBuild) {
-            if (state.lastBuild.success) {
-                item.text = '$(check) ACF 编译成功';
-                item.tooltip = `最近编译耗时 ${(state.lastBuild.durationMs / 1000).toFixed(1)}s\n点击打开 Auto CMake Flash 面板`;
-            }
-            else {
-                item.text = '$(error) ACF 编译失败';
-                item.tooltip = '最近一次编译失败，已阻止烧录。\n点击打开 Auto CMake Flash 面板';
-            }
-        }
-        else {
-            item.text = '$(chip) ACF';
-            item.tooltip = 'Auto CMake Flash（点击打开面板）';
-        }
         // 工程/目标选择按钮（最左）：工程名·目标名，busy 时显示转圈
         const projectName = state.project?.name ??
             (state.root ? state.root.split(/[\\/]/).filter((s) => s.length > 0).pop() : undefined);
@@ -119,13 +74,11 @@ class StatusBar {
         this.flashBtn.text = state.busy === 'flash' ? '$(sync~spin) 烧录中' : '$(rocket) 烧录';
         this.buildBtn.show();
         this.flashBtn.show();
-        item.show();
     }
     dispose() {
         this.projectBtn.dispose();
         this.buildBtn.dispose();
         this.flashBtn.dispose();
-        this.item.dispose();
     }
 }
 exports.StatusBar = StatusBar;
