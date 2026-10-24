@@ -28,14 +28,14 @@ export class ConfigPanel {
 
   show(): void {
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Beside);
+      this.panel.reveal(vscode.ViewColumn.Active);
       this.postSettings();
       return;
     }
     this.panel = vscode.window.createWebviewPanel(
       'autoCmakeFlash.config',
       'ACF 配置',
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+      { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       { enableScripts: true, retainContextWhenHidden: true },
     );
     this.panel.webview.html = this.html();

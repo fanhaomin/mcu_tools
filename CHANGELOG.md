@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.4] - 2026-10-24
+
+### Fixed
+- 配置面板不再横向分栏（此前 viewColumn=Beside 会把编辑器劈成两栏）：改为在当前编辑器栏直接打开，标题栏可随时切回代码文件。
+
 ## [0.8.3] - 2026-10-24
 
 ### Changed — 配置面板改为编辑器内表单页
