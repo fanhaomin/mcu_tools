@@ -1,14 +1,12 @@
 /**
- * 「内存视图」WebviewView：Keil 风格的内存 hexdump 窗口。
- * 添加地址区间（16-16384B），50-500ms 实时刷新；字节点击可编辑写回。
- * 渲染为增量式：表格结构只在添加/删除区域时重建，数值刷新只更新
- * 变化的单元格文本——大区域（16KB≈1.6 万格）也不会卡。
- * 区间持久化在 workspaceState（每个工程独立）。
+ * 「内存视图」WebviewView：Keil 风格的内存查看器。
+ * 单一 256 字节视口（16 行 × 16 列）：地址回车跳转（带历史下拉），
+ * 滚轮逐行滚动、Shift+滚轮整页；每轮只读取当前可见的 256 字节。
+ * 字节点击可编辑写回。历史与上次地址持久化在 workspaceState。
  */
 
 import * as vscode from 'vscode';
 import { readBlock, sampleWhileRunning, delay } from '../debug/dapHelpers';
-import { formatHexDump } from '../debug/hexdump';
 
 export interface MemViewDeps {
   getSession(): vscode.DebugSession | undefined;
@@ -16,20 +14,17 @@ export interface MemViewDeps {
   memento: vscode.Memento;
 }
 
-interface MemRegion {
-  addr: number;
-  bytes: number;
-}
-
-const STORE_KEY = 'acf.mem.regions';
-const MAX_REGIONS = 8;
-const MAX_BYTES = 16384;
+const VIEW_BYTES = 256;
+const HIST_KEY = 'acf.mem.history';
+const LAST_KEY = 'acf.mem.lastBase';
+const MAX_HISTORY = 12;
 
 export class MemViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'autoCmakeFlash.memview';
   private view?: vscode.WebviewView;
   private visible = false;
-  private regions: MemRegion[] = [];
+  private history: number[] = [];
+  private lastBase = 0x20000000;
 
   constructor(private readonly deps: MemViewDeps) {}
 
@@ -42,70 +37,48 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
     view.onDidChangeVisibility(() => {
       this.visible = view.visible;
       if (view.visible) {
-        this.postRegions();
+        this.postInit();
       }
     });
-    this.regions = this.deps.memento.get<MemRegion[]>(STORE_KEY, []);
-    this.postRegions();
+    this.history = this.deps.memento.get<number[]>(HIST_KEY, []);
+    this.lastBase = this.deps.memento.get<number>(LAST_KEY, 0x20000000);
+    this.postInit();
   }
 
-  private async persist(): Promise<void> {
-    await this.deps.memento.update(STORE_KEY, this.regions);
+  private postInit(): void {
+    void this.view?.webview.postMessage({
+      cmd: 'init',
+      base: this.lastBase,
+      history: this.history,
+    });
+  }
+
+  /** 回车/下拉选择：更新历史并通知 */
+  private async setBase(base: number): Promise<void> {
+    this.lastBase = base;
+    this.history = [base, ...this.history.filter((h) => h !== base)].slice(0, MAX_HISTORY);
+    await this.deps.memento.update(HIST_KEY, this.history);
+    await this.deps.memento.update(LAST_KEY, base);
+    this.postInit();
   }
 
   private async onMessage(m: {
     cmd?: string;
-    addr?: number;
-    bytes?: number;
-    key?: number;
-    interval?: number;
+    base?: number;
     byteAddr?: number;
     byteValue?: number;
+    interval?: number;
   }): Promise<void> {
     switch (m.cmd) {
       case 'ready':
-        this.postRegions();
+        this.postInit();
         break;
-      case 'add': {
-        let addr = Number(m.addr);
-        if (!Number.isFinite(addr) || addr <= 0 || addr > 0xffffffff) {
+      case 'base': {
+        const base = Number(m.base);
+        if (!Number.isFinite(base) || base < 0 || base > 0xffffffff) {
           return;
         }
-        let bytes = Number(m.bytes) || 256;
-        let clamped = false;
-        if (bytes > MAX_BYTES) {
-          bytes = MAX_BYTES;
-          clamped = true;
-        }
-        bytes = Math.max(16, bytes);
-        addr = Math.floor(addr);
-        if (this.regions.some((r) => r.addr === addr)) {
-          return;
-        }
-        if (this.regions.length >= MAX_REGIONS) {
-          void this.view?.webview.postMessage({
-            cmd: 'toast',
-            msg: `最多 ${MAX_REGIONS} 个区域`,
-            err: true,
-          });
-          return;
-        }
-        this.regions.push({ addr, bytes });
-        await this.persist();
-        this.postRegions();
-        if (clamped) {
-          void this.view?.webview.postMessage({
-            cmd: 'toast',
-            msg: `单区域上限 ${MAX_BYTES} 字节（渲染性能考虑），已自动调整`,
-            err: true,
-          });
-        }
-        break;
-      }
-      case 'remove': {
-        this.regions = this.regions.filter((r) => r.addr !== m.key);
-        await this.persist();
-        this.postRegions();
+        await this.setBase(base & ~0xf);
         break;
       }
       case 'writeByte': {
@@ -114,7 +87,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
       }
       case 'read': {
         if (this.visible) {
-          await this.refresh(m.interval ?? 200);
+          await this.refresh(Number(m.base) || this.lastBase, m.interval ?? 200);
         }
         break;
       }
@@ -144,61 +117,36 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private postRegions(): void {
-    void this.view?.webview.postMessage({
-      cmd: 'regions',
-      regions: this.regions,
-      maxBytes: MAX_BYTES,
-    });
-  }
-
-  private async refresh(intervalMs: number): Promise<void> {
+  private async refresh(base: number, intervalMs: number): Promise<void> {
     const s = this.deps.getSession();
-    if (!s || this.regions.length === 0) {
+    if (!s) {
       return;
     }
     const nonIntrusive = s.type === 'probe-rs-debug';
-    const out: Record<number, { data?: string; ok: boolean }> = {};
-    const failed: MemRegion[] = [];
+    let buf = await readBlock(s, base, VIEW_BYTES);
+    let ok = !!buf;
 
-    await Promise.all(
-      this.regions.map(async (r) => {
-        const buf = await readBlock(s, r.addr, r.bytes);
-        if (buf) {
-          out[r.addr] = { data: buf.toString('base64'), ok: true };
-        } else {
-          failed.push(r);
-          out[r.addr] = { ok: false };
-        }
-      }),
-    );
-
-    if (!nonIntrusive && failed.length > 0) {
-      // cortex-debug：微停机窗口重读
-      await sampleWhileRunning(s, this.deps.log, async () => {
-        await Promise.all(
-          failed.map(async (r) => {
-            const buf = await readBlock(s, r.addr, r.bytes);
-            if (buf) {
-              out[r.addr] = { data: buf.toString('base64'), ok: true };
-            }
-          }),
-        );
-      });
-    } else if (nonIntrusive && failed.length > 0) {
-      // probe-rs 运行中偶发失败：短暂等待重试一次（不动目标）
-      await delay(30);
-      await Promise.all(
-        failed.map(async (r) => {
-          const buf = await readBlock(s, r.addr, r.bytes);
-          if (buf) {
-            out[r.addr] = { data: buf.toString('base64'), ok: true };
-          }
-        }),
-      );
+    if (!ok) {
+      if (nonIntrusive) {
+        // probe-rs 运行中偶发失败：短暂等待重试一次（不动目标）
+        await delay(30);
+        buf = await readBlock(s, base, VIEW_BYTES);
+        ok = !!buf;
+      } else {
+        // cortex-debug：微停机窗口读取
+        await sampleWhileRunning(s, this.deps.log, async () => {
+          buf = await readBlock(s, base, VIEW_BYTES);
+          ok = !!buf;
+        });
+      }
     }
 
-    void this.view?.webview.postMessage({ cmd: 'data', data: out });
+    void this.view?.webview.postMessage({
+      cmd: 'data',
+      base,
+      data: buf ? buf.toString('base64') : undefined,
+      ok,
+    });
   }
 
   private html(): string {
@@ -208,29 +156,21 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
              margin: 0; padding: 8px 10px 20px; }
       :root { --ac: #58b6f8; --ok: #4ec994; }
       .row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
-      input[type=text] { padding: 5px 9px; border-radius: 6px;
+      #addr { flex: 1; min-width: 0; padding: 5px 9px; border-radius: 6px;
         border: 1px solid var(--vscode-input-border, rgba(128,128,128,.35));
         background: var(--vscode-input-background); color: var(--vscode-input-foreground);
         font-family: var(--vscode-editor-font-family, monospace); }
-      input:focus { outline: none; border-color: var(--ac); }
-      #addr { flex: 1; min-width: 0; }
-      #len { width: 70px; }
-      button { font-family: inherit; font-size: 12px; padding: 4px 12px; border-radius: 6px;
-        cursor: pointer; border: 1px solid transparent;
-        background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-      .card { border: 1px solid rgba(128,128,128,.25); border-radius: 8px; margin-bottom: 10px;
+      #addr:focus { outline: none; border-color: var(--ac); }
+      .card { border: 1px solid rgba(128,128,128,.25); border-radius: 8px;
         background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent); overflow: hidden; }
       .head { display: flex; align-items: center; padding: 5px 10px; gap: 8px;
         border-bottom: 1px solid rgba(128,128,128,.18); }
       .head .a { font-family: var(--vscode-editor-font-family, monospace); font-weight: 700; color: var(--ac); }
       .head .n { font-size: 10.5px; color: var(--vscode-descriptionForeground); }
-      .head .del { margin-left: auto; cursor: pointer; color: var(--vscode-descriptionForeground); }
-      .head .del:hover { color: #f14c4c; }
-      .scroll { max-height: 420px; overflow-y: auto; }
       table { width: 100%; border-collapse: collapse; font-family: var(--vscode-editor-font-family, monospace); }
       td { padding: 2px 4px; white-space: nowrap; }
       tr:hover { background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
-      .a { color: var(--vscode-descriptionForeground); font-size: 10.5px; }
+      .a { color: var(--vscode-descriptionForeground); font-size: 10.5px; user-select: none; cursor: grab; }
       .by { cursor: pointer; padding: 1px 3px; border-radius: 3px; text-align: center; min-width: 22px; }
       .by:hover { background: color-mix(in srgb, var(--ac) 25%, transparent); color: var(--ac); }
       .by input { width: 26px; padding: 0 2px; font-family: inherit; font-size: 11px;
@@ -238,8 +178,8 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
         border: 1px solid var(--ac); border-radius: 3px; text-align: center; }
       .asc { color: var(--vscode-descriptionForeground); padding-left: 8px; }
       .chg { color: var(--ok); font-weight: 700; }
-      .empty { padding: 14px 6px; color: var(--vscode-descriptionForeground);
-        text-align: center; line-height: 1.7; }
+      .stale { opacity: .45; }
+      .hint { font-size: 10.5px; color: var(--vscode-descriptionForeground); }
       .row2 { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px;
         font-size: 10.5px; color: var(--vscode-descriptionForeground); }
       select { padding: 3px 6px; border-radius: 5px; font-size: 11px;
@@ -253,14 +193,15 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
       #toast.show { opacity: 1; }
       #toast.err { border-color: #f14c4c; color: #f14c4c;
         background: color-mix(in srgb, #f14c4c 12%, var(--vscode-sideBar-background)); }
-      .stale { opacity: .45; }
     </style></head><body>
       <div class="row">
-        <input id="addr" type="text" placeholder="0x20000000（回车添加）">
-        <input id="len" type="text" value="256" title="字节数（16-16384）">
-        <button id="add">添加</button>
+        <input id="addr" type="text" list="hist" placeholder="0x20000000（回车跳转）">
+        <datalist id="hist"></datalist>
       </div>
-      <div id="regions"><div class="empty">添加要查看的内存地址<br>如 0x20000000（SRAM）、0x40010800（GPIOA）</div></div>
+      <div class="card" id="card">
+        <div class="head"><span class="a" id="base">—</span><span class="n">256 B · 实时</span></div>
+        <table id="tbl"></table>
+      </div>
       <div class="row2">刷新
         <select id="iv">
           <option value="50">50ms</option>
@@ -268,12 +209,13 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
           <option value="200" selected>200ms</option>
           <option value="500">500ms</option>
         </select>
-        · 点字节格编辑写回 · 修改过的字节绿色高亮 · 单区域上限 16KB
+        · 回车跳转 · 滚轮逐行 / Shift+滚轮整页 · 点字节格编辑写回
       </div>
       <div id="toast"></div>
       <script>
         const vscode = acquireVsCodeApi();
-        const state = { regions: [], data: {}, timer: null, interval: 200, changed: {}, cells: {} };
+        const VIEW = 256;
+        const state = { base: 0x20000000, data: null, ok: false, timer: null, interval: 200, changed: {}, history: [] };
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         function post(m) { vscode.postMessage(m); }
@@ -285,123 +227,137 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
           t._h = setTimeout(() => { t.className = err ? 'err' : ''; }, 2600);
         }
 
-        // 结构重建：仅在添加/删除区域时执行；单元格元素存入 state.cells 供增量更新
-        function render() {
-          const wrap = $('regions');
-          state.cells = {};
-          if (state.regions.length === 0) {
-            wrap.innerHTML = '<div class="empty">添加要查看的内存地址<br>如 0x20000000（SRAM）、0x40010800（GPIOA）</div>';
-            return;
-          }
-          wrap.innerHTML = state.regions.map((r) => {
-            let h = '<div class="card" data-k="' + r.addr + '"><div class="head">' +
-              '<span class="a">0x' + r.addr.toString(16).toUpperCase() + '</span>' +
-              '<span class="n">' + r.bytes + ' B · 实时</span>' +
-              '<span class="del" title="移除">✕</span></div><div class="scroll"><table>';
-            for (let off = 0; off < r.bytes; off += 16) {
-              h += '<tr><td class="a">0x' + (r.addr + off).toString(16).toUpperCase().padStart(8, '0') + '</td>';
-              for (let i = 0; i < 16 && off + i < r.bytes; i++) {
-                const abs = r.addr + off + i;
-                h += '<td class="by" data-a="' + abs + '">·</td>';
-              }
-              h += '<td class="asc" data-rowa="' + off + '"></td></tr>';
+        // 结构：一次性建 16 行 × 16 格 + ASCII 列；地址/数值后续增量更新
+        function build() {
+          const tbl = $('tbl');
+          let h = '';
+          for (let r = 0; r < 16; r++) {
+            h += '<tr><td class="a" data-r="' + r + '"></td>';
+            for (let c = 0; c < 16; c++) {
+              h += '<td class="by" data-c="' + c + '" data-r="' + r + '">·</td>';
             }
-            h += '</table></div></div>';
-            return h;
-          }).join('');
-          wrap.querySelectorAll('.card').forEach((card) => {
-            const key = +card.getAttribute('data-k');
-            card.querySelector('.del').onclick = () => post({ cmd: 'remove', key });
-            card.querySelectorAll('.by').forEach((cell) => {
-              state.cells[+cell.getAttribute('data-a')] = cell;
-              cell.onclick = () => {
-                if (cell.querySelector('input')) return;
-                const cur = cell.textContent.trim();
-                cell.innerHTML = '<input maxlength="2" value="' + esc(cur === '·' ? '' : cur) + '">';
-                const inp = cell.querySelector('input');
-                inp.focus(); inp.select();
-                const done = () => render();
-                inp.onkeydown = (ev) => {
-                  if (ev.key === 'Enter') {
-                    const v = parseInt(inp.value, 16);
-                    const addr = +cell.getAttribute('data-a');
-                    if (Number.isFinite(v)) {
-                      state.changed[addr] = v;
-                      post({ cmd: 'writeByte', byteAddr: addr, byteValue: v });
-                    }
-                    done();
+            h += '<td class="asc" data-r="' + r + '"></td></tr>';
+          }
+          tbl.innerHTML = h;
+          tbl.querySelectorAll('.by').forEach((cell) => {
+            cell.onclick = () => {
+              if (cell.querySelector('input') || !state.ok) return;
+              const cur = cell.textContent.trim();
+              cell.innerHTML = '<input maxlength="2" value="' + esc(cur === '·' ? '' : cur) + '">';
+              const inp = cell.querySelector('input');
+              inp.focus(); inp.select();
+              const abs = state.base + (+cell.getAttribute('data-r')) * 16 + (+cell.getAttribute('data-c'));
+              const done = () => renderData();
+              inp.onkeydown = (ev) => {
+                if (ev.key === 'Enter') {
+                  const v = parseInt(inp.value, 16);
+                  if (Number.isFinite(v)) {
+                    state.changed[abs] = v;
+                    post({ cmd: 'writeByte', byteAddr: abs, byteValue: v });
                   }
-                  if (ev.key === 'Escape') done();
-                };
-                inp.onblur = () => done();
+                  done();
+                }
+                if (ev.key === 'Escape') done();
               };
-            });
+              inp.onblur = () => done();
+            };
           });
-          updateCells();
+          renderData();
+          renderHist();
         }
 
-        // 增量更新：只改文本变化的单元格（16KB ≈ 1.6 万格也在毫秒级）
-        function updateCells() {
-          for (const r of state.regions) {
-            const d = state.data[r.addr];
-            const table = document.querySelector('.card[data-k="' + r.addr + '"] table');
-            if (!table) continue;
-            table.parentElement.classList.toggle('stale', !d || !d.ok);
-            if (!d || !d.ok || !d.data) continue;
-            const buf = Uint8Array.from(atob(d.data), (c) => c.charCodeAt(0));
-            for (let i = 0; i < buf.length; i++) {
-              const abs = r.addr + i;
-              const cell = state.cells[abs];
-              if (!cell) continue;
+        // 数值增量更新：只改文本变化的单元格
+        function renderData() {
+          $('base').textContent = '0x' + state.base.toString(16).toUpperCase();
+          $('card').classList.toggle('stale', !state.ok);
+          const rows = $('tbl').querySelectorAll('tr');
+          if (!state.ok || !state.data) {
+            rows.forEach((tr) => {
+              tr.querySelectorAll('.by').forEach((c) => { c.textContent = '·'; c.classList.remove('chg'); });
+              tr.querySelector('.asc').textContent = '';
+              tr.querySelector('.a').textContent = '';
+            });
+            return;
+          }
+          const buf = Uint8Array.from(atob(state.data), (c) => c.charCodeAt(0));
+          for (let r = 0; r < 16; r++) {
+            const tr = rows[r];
+            tr.querySelector('.a').textContent = '0x' + (state.base + r * 16).toString(16).toUpperCase().padStart(8, '0');
+            let ascii = '';
+            tr.querySelectorAll('.by').forEach((cell, c) => {
+              const i = r * 16 + c;
+              if (i >= buf.length) { cell.textContent = ''; return; }
               const b = buf[i];
               const txt = b.toString(16).toUpperCase().padStart(2, '0');
+              const abs = state.base + i;
               const chg = state.changed[abs];
               const want = chg !== undefined ? chg.toString(16).toUpperCase().padStart(2, '0') : txt;
               if (cell.textContent !== want) cell.textContent = want;
               cell.classList.toggle('chg', chg !== undefined);
-            }
-            // ASCII 列
-            const rows = table.querySelectorAll('tr');
-            for (let ri = 0; ri < rows.length; ri++) {
-              const asc = rows[ri].querySelector('.asc');
-              if (!asc) continue;
-              let a = '';
-              for (let i = 0; i < 16; i++) {
-                const b = buf[ri * 16 + i];
-                if (b === undefined) break;
-                a += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '·';
-              }
-              if (asc.textContent !== a) asc.textContent = a;
-            }
+              ascii += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '·';
+            });
+            const asc = tr.querySelector('.asc');
+            if (asc.textContent !== ascii) asc.textContent = ascii;
           }
         }
 
+        function renderHist() {
+          $('hist').innerHTML = state.history.map((h) =>
+            '<option value="0x' + h.toString(16).toUpperCase() + '">').join('');
+        }
+
+        function jump(base) {
+          base = Math.max(0, Math.min(0xfffffef0, base)) & ~0xf;
+          if (base === state.base) return;
+          state.base = base;
+          state.changed = {};
+          build();
+          tick();
+        }
+
         function tick() {
-          if (state.regions.length === 0) return;
-          post({ cmd: 'read', interval: state.interval });
+          post({ cmd: 'read', base: state.base, interval: state.interval });
         }
 
         window.addEventListener('message', (e) => {
           const m = e.data;
-          if (m.cmd === 'regions') {
-            state.regions = m.regions || [];
-            render();
+          if (m.cmd === 'init') {
+            state.base = m.base; state.history = m.history || [];
+            build();
           } else if (m.cmd === 'data') {
-            state.data = m.data || {};
-            updateCells();
+            if (m.base !== state.base) return; // 过期响应（滚动后旧数据）
+            state.data = m.data; state.ok = m.ok;
+            renderData();
+          } else if (m.cmd === 'initHist') {
+            state.history = m.history || [];
+            renderHist();
           } else if (m.cmd === 'toast') {
             toast(m.msg, m.err);
           }
         });
 
-        function add() {
-          const a = parseInt($('addr').value, 16);
-          if (!Number.isFinite(a)) return;
-          post({ cmd: 'add', addr: a, bytes: parseInt($('len').value, 10) || 256 });
-          $('addr').value = '';
-        }
-        $('add').addEventListener('click', add);
-        $('addr').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') add(); });
+        // 回车 / 下拉历史选择 → 跳转（host 记历史）
+        $('addr').addEventListener('keydown', (ev) => {
+          if (ev.key !== 'Enter') return;
+          const v = parseInt($('addr').value, 16);
+          if (!Number.isFinite(v)) return;
+          post({ cmd: 'base', base: v });
+          jump(v);
+        });
+        $('addr').addEventListener('change', () => {
+          const v = parseInt($('addr').value, 16);
+          if (!Number.isFinite(v)) return;
+          post({ cmd: 'base', base: v });
+          jump(v);
+        });
+
+        // 滚轮：逐行 / Shift 整页（在卡片上滚动 = 移动视口）
+        $('card').addEventListener('wheel', (ev) => {
+          ev.preventDefault();
+          const step = ev.shiftKey ? VIEW : 16;
+          jump(state.base + (ev.deltaY > 0 ? step : -step));
+        }, { passive: false });
+
         $('iv').addEventListener('change', () => {
           state.interval = +$('iv').value;
           if (state.timer) clearInterval(state.timer);
