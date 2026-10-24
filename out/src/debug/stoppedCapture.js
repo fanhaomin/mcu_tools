@@ -34,7 +34,11 @@ async function captureTopFrameVariables(session) {
                 }));
                 for (const v of vars?.variables ?? []) {
                     if (v.name && !out.has(v.name)) {
-                        out.set(v.name, { memoryReference: v.memoryReference, value: v.value });
+                        out.set(v.name, {
+                            memoryReference: v.memoryReference,
+                            variablesReference: v.variablesReference,
+                            value: v.value,
+                        });
                     }
                 }
             }

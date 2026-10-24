@@ -9,6 +9,8 @@ import * as vscode from 'vscode';
 export interface CapturedVar {
   /** DAP memoryReference（可能是 0x 地址或适配器句柄） */
   memoryReference?: string;
+  /** DAP variablesReference（数组/结构体的子节点） */
+  variablesReference?: number;
   /** 解析出的展示值（暂停瞬间的值） */
   value?: string;
 }
@@ -49,11 +51,16 @@ export async function captureTopFrameVariables(
             name?: string;
             value?: string;
             memoryReference?: string;
+            variablesReference?: number;
           }[];
         };
         for (const v of vars?.variables ?? []) {
           if (v.name && !out.has(v.name)) {
-            out.set(v.name, { memoryReference: v.memoryReference, value: v.value });
+            out.set(v.name, {
+              memoryReference: v.memoryReference,
+              variablesReference: v.variablesReference,
+              value: v.value,
+            });
           }
         }
       } catch {
