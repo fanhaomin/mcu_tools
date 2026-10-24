@@ -1097,6 +1097,15 @@ function init(context) {
     });
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(periphView_1.PeriphViewProvider.viewType, periph, { webviewOptions: { retainContextWhenHidden: true } }));
     const isEngineSession = (s) => s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
+    if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {
+        engineSession = vscode.debug.activeDebugSession;
+    }
+    context.subscriptions.push(vscode.debug.onDidChangeActiveDebugSession((s) => {
+        if (s && isEngineSession(s)) {
+            engineSession = s;
+            periph.pushSession();
+        }
+    }));
     context.subscriptions.push(vscode.debug.onDidStartDebugSession((s) => {
         if (isEngineSession(s)) {
             engineSession = s;

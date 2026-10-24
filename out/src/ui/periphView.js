@@ -396,12 +396,12 @@ class PeriphViewProvider {
                 border: 1px solid var(--dim); border-radius: 8px; padding: 4px 12px; width: 190px; }
       .bigval:focus { outline: none; border-color: var(--ac); }
       .hint { font-size: 11px; color: var(--vscode-descriptionForeground); }
-      .bits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
-      .b { width: 34px; border-radius: 5px; text-align: center; padding: 4px 0 5px;
+      .bits { display: grid; grid-template-columns: repeat(16, 46px); gap: 3px; justify-content: start; margin-top: 10px; }
+      .b { width: 46px; height: 46px; border-radius: 6px; text-align: center; padding: 4px 0 5px;
            border: 1px solid var(--dim); user-select: none; }
       .b .i { font-size: 9px; color: var(--vscode-descriptionForeground); }
       .b .v { font-family: var(--vscode-editor-font-family, monospace); font-size: 14px; font-weight: 700; }
-      .b .fn { font-size: 8.5px; color: var(--vscode-descriptionForeground); overflow: hidden;
+      .b .fn { font-size: 9px; color: var(--vscode-descriptionForeground); overflow: hidden;
                white-space: nowrap; text-overflow: ellipsis; }
       .b.on { background: color-mix(in srgb, var(--ok) 22%, transparent);
               border-color: color-mix(in srgb, var(--ok) 60%, transparent); color: var(--ok); }
@@ -494,7 +494,7 @@ class PeriphViewProvider {
               '<div class="desc">' + esc(r.description || '') + '</div>' +
               '<div class="bigrow"><input id="bigv" class="bigval"' + (ro ? ' readonly' : '') + ' placeholder="—"> ' +
               '<span class="hint">输入十六进制 · 回车写入</span></div>' +
-              '<div class="bits" id="bits"></div><div id="frows"></div></div>';
+              '<div class="bits" id="bits"></div></div>';
           } else {
             h += '<div class="empty">↑ 在左侧选择一个寄存器查看内容</div>';
           }
@@ -545,7 +545,7 @@ class PeriphViewProvider {
           let h = '';
           for (let b = r.size - 1; b >= 0; b--) {
             const f = fields.find(x => b >= x.bitOffset && b < x.bitOffset + x.bitWidth);
-            h += '<div class="b' + (ro ? '' : ' rw') + '" data-bit="' + b + '"' + (f ? ' title="' + esc(f.name) + '"' : '') + '>' +
+            h += '<div class="b' + (ro ? '' : ' rw') + '" data-bit="' + b + '"' + (f ? ' title="' + esc(f.name) + '"' : (ro ? '' : ' title="点击翻转 bit ' + b + ' 并写入"')) + '>' +
               '<div class="i">' + b + '</div><div class="v">·</div>' +
               '<div class="fn">' + esc(f ? f.name : '') + '</div></div>';
           }
@@ -565,30 +565,6 @@ class PeriphViewProvider {
               const nv = ((parseInt(v.hex, 16) ^ (1 << bit)) >>> 0);
               post({ cmd: 'write', addr: r.address, size: r.size, value: nv });
             };
-          });
-          const meaningful = fields.filter(f => f.bitWidth > 1 || (f.enumerated && f.enumerated.length > 0));
-          state.frowFields = meaningful;
-          const fr = $('frows'); if (!fr) return;
-          if (meaningful.length === 0) { fr.innerHTML = ''; return; } // 全是单bit无枚举的琐碎字段（如 ODR/BSRR）：点阵已足够，不重复展示
-          let h2 = '';
-          meaningful.forEach((f, i) => {
-            h2 += '<div class="frow" data-i="' + i + '"><span class="frange">[' + (f.bitOffset + f.bitWidth - 1) + ':' + f.bitOffset + ']</span>' +
-              '<span class="fname2">' + esc(f.name) + '</span><span class="fenum" id="fe' + i + '"></span>' +
-              '<input class="fin" data-i="' + i + '" title="回车写入位域"></div>';
-          });
-          fr.innerHTML = h2;
-          fr.querySelectorAll('.fin').forEach(inp => {
-            inp.addEventListener('keydown', (ev) => {
-              if (ev.key !== 'Enter') return;
-              const i = +inp.getAttribute('data-i');
-              const f = (state.frowFields || [])[i]; if (!f) return;
-              const v = state.vals[state.active + '.' + state.sel];
-              const cur = v && v.ok ? parseInt(v.hex, 16) : 0;
-              const fv = (parseInt(inp.value, 16) || 0) & ((1 << f.bitWidth) - 1);
-              const nv = (cur & ~(((1 << f.bitWidth) - 1) << f.bitOffset)) | (fv << f.bitOffset);
-              post({ cmd: 'write', addr: curReg().address, size: curReg().size, value: nv >>> 0 });
-              inp.blur();
-            });
           });
         }
 
@@ -611,15 +587,6 @@ class PeriphViewProvider {
             el.classList.toggle('on', on);
             el.querySelector('.v').textContent = num !== null ? (on ? '1' : '0') : '·';
           });
-          (state.frowFields || []).forEach((f, i) => {
-            const fe = $('fe' + i); if (!fe) return;
-            const fvEl = $('fin[data-i="' + i + '"]');
-            if (num === null) { if (fe) fe.textContent = ''; return; }
-            const fv = (num >> f.bitOffset) & ((1 << f.bitWidth) - 1);
-            const en = f.enumerated ? (f.enumerated.find(x => x.value === fv) || {}).label : '';
-            if (fe) fe.textContent = en || '';
-            if (fvEl && document.activeElement !== fvEl) fvEl.placeholder = fv.toString(16).toUpperCase();
-          });
           if (state.active.indexOf('GPIO') === 0) {
             const odr = state.regs.find(x => x.name === 'ODR');
             const idr = state.regs.find(x => x.name === 'IDR');
@@ -638,7 +605,9 @@ class PeriphViewProvider {
         }
 
         function tick() {
-          if (!state.active || state.regs.length === 0 || !state.session) return;
+          // 会话标志仅作提示用途：读取交给 host 判定（host 无会话时返回 —），
+          // 避免标志时序问题导致面板空转不读
+          if (!state.active || state.regs.length === 0) return;
           const items = state.regs.map(r => ({ key: state.active + '.' + r.name, addr: r.address, size: r.size }));
           post({ cmd: 'read', items: items });
         }

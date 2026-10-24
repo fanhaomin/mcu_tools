@@ -1354,6 +1354,14 @@ function init(context: vscode.ExtensionContext): void {
   );
   const isEngineSession = (s: vscode.DebugSession): boolean =>
     s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
+  if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {
+    engineSession = vscode.debug.activeDebugSession;
+  }
+  context.subscriptions.push(
+    vscode.debug.onDidChangeActiveDebugSession((s) => {
+      if (s && isEngineSession(s)) { engineSession = s; periph.pushSession(); }
+    }),
+  );
   context.subscriptions.push(
     vscode.debug.onDidStartDebugSession((s) => {
       if (isEngineSession(s)) {
