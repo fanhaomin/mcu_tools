@@ -369,7 +369,7 @@ class WatchViewProvider {
                             hex: (0, dapHelpers_2.toHexLE)(buf, e.bytes * 8),
                             ok: true,
                             bytes: e.bytes,
-                            addr: e.addr,
+                            addr: e.addr ?? 0,
                         };
                     }
                 }));

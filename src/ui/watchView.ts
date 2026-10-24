@@ -382,7 +382,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
                 hex: toHexLE(buf, e.bytes * 8),
                 ok: true,
                 bytes: e.bytes,
-                addr: e.addr,
+                addr: e.addr ?? 0,
               };
             }
           }),
