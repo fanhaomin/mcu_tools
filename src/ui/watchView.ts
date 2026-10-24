@@ -75,7 +75,10 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
           void vscode.window.showWarningMessage(`变量监控最多 ${MAX_ENTRIES} 个条目。`);
           return;
         }
-        this.entries.push({ expr, bytes: 4 });
+        const addrMatch = /^0x[0-9a-fA-F]{1,8}$/.exec(expr);
+        this.entries.push(addrMatch
+          ? { expr, addr: parseInt(expr, 16), bytes: 4 }
+          : { expr, bytes: 4 });
         await this.persist();
         this.postEntries();
         break;
@@ -164,25 +167,52 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         }),
     );
 
-    // 2. 未解析的：尝试 evaluate 解析（probe-rs 运行中通常可用）
+    // 2. 未解析的：尝试 evaluate 解析（probe-rs 运行中不支持 evaluate，
+    //    失败持续 2 秒后自动微停机一次完成解析——只停一次，之后纯旁路）
     const unresolved = this.entries.filter((e) => e.addr === undefined);
-    if (unresolved.length > 0 && nonIntrusive) {
-      await Promise.all(
-        unresolved.map(async (e) => {
-          await this.resolveEntry(s, e, false);
-          if (e.addr !== undefined) {
-            const buf = await readBlock(s, e.addr, e.bytes);
-            if (buf) {
-              results[e.expr] = {
-                hex: toHexLE(buf, e.bytes * 8),
-                ok: true,
-                bytes: e.bytes,
-                addr: e.addr,
-              };
+    if (unresolved.length > 0) {
+      if (nonIntrusive) {
+        await Promise.all(
+          unresolved.map(async (e) => {
+            await this.resolveEntry(s, e, false);
+            if (e.addr !== undefined) {
+              const buf = await readBlock(s, e.addr, e.bytes);
+              if (buf) {
+                results[e.expr] = {
+                  hex: toHexLE(buf, e.bytes * 8),
+                  ok: true,
+                  bytes: e.bytes,
+                  addr: e.addr,
+                };
+              }
             }
-          }
-        }),
-      );
+          }),
+        );
+      }
+      // probe-rs 运行中 evaluate 必然失败：2 秒后微停机一次完成解析
+      const stillUnresolved = this.entries.filter((e) => e.addr === undefined);
+      if (stillUnresolved.length > 0 && Date.now() - this.lastProbeSample > 2_000) {
+        this.lastProbeSample = Date.now();
+        this.deps.log('变量监控: 运行中无法解析符号，微停机一次完成解析（之后纯旁路读取）');
+        await sampleWhileRunning(s, this.deps.log, async () => {
+          await Promise.all(
+            stillUnresolved.map(async (e) => {
+              await this.resolveEntry(s, e, true);
+              if (e.addr !== undefined) {
+                const buf = await readBlock(s, e.addr, e.bytes);
+                if (buf) {
+                  results[e.expr] = {
+                    hex: toHexLE(buf, e.bytes * 8),
+                    ok: true,
+                    bytes: e.bytes,
+                    addr: e.addr,
+                  };
+                }
+              }
+            }),
+          );
+        });
+      }
     }
 
     // 3. cortex-debug：读取失败或未解析 → 微停机窗口统一处理
@@ -215,6 +245,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
   }
 
   private readFailedRecently = false;
+  private lastProbeSample = 0;
 
   private html(): string {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -275,7 +306,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         function render() {
           const list = $('list');
           if (state.entries.length === 0) {
-            list.innerHTML = '<div class="empty">添加要实时监控的变量<br>如 uwTick、&结构体字段、0x20000000</div>';
+            list.innerHTML = '<div class="empty">添加要实时监控的变量<br>变量名（如 led_toggle_count）· 表达式（&arr[2]）· 0x20000000<br>提示：CMSIS 宏（如 SCB->VTOR）需工程带宏调试信息（-g3），否则请直接用其地址</div>';
             return;
           }
           list.innerHTML = state.entries.map((e) => {
