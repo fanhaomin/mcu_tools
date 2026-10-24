@@ -22,6 +22,8 @@ export interface BuildInput {
   cmakePath: string;
   buildType: string;
   generator?: string;
+  /** 用户指定的 CMake 目标（状态栏目标选择）：只构建该目标 */
+  target?: string;
   token?: CancelToken;
   timeoutMs?: number;
   log(msg: string): void;
@@ -135,8 +137,12 @@ export async function buildProject(input: BuildInput): Promise<BuildOutcome> {
   if (multiConfig) {
     args.push('--config', input.buildType);
   }
+  if (input.target) {
+    // 用户指定了 CMake 目标（状态栏目标选择）：只构建该目标
+    args.push('--target', input.target);
+  }
 
-  log(`开始编译 (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`);
+  log(`开始编译${input.target ? ` 目标 ${input.target}` : ''} (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`);
   const result = await execFileSafe(input.cmakePath, args, {
     cwd: input.root,
     timeoutMs: input.timeoutMs ?? 600_000,
@@ -151,7 +157,11 @@ export async function buildProject(input: BuildInput): Promise<BuildOutcome> {
   let elfMtimeMs: number | undefined;
   if (success) {
     const artifacts = await findArtifacts(input.buildDir);
-    const elf = artifacts.find((a) => a.format === 'elf');
+    // 选了目标时优先锁定 <目标名>.elf，防止多目标工程误认到"最新链接"的另一个 ELF
+    const want = input.target ? `${input.target.toLowerCase()}.elf` : undefined;
+    const elf =
+      (want ? artifacts.find((a) => a.path.toLowerCase().endsWith(want)) : undefined) ??
+      artifacts.find((a) => a.format === 'elf');
     elfPath = elf?.path;
     elfMtimeMs = elf?.mtimeMs;
   }
@@ -170,6 +180,7 @@ export async function buildProject(input: BuildInput): Promise<BuildOutcome> {
     elfPath,
     elfMtimeMs,
     cancelled: result.cancelled || undefined,
+    timedOut: result.timedOut || undefined,
   };
 
   // 持久化构建记录（烧录流程以此为门禁）+ 完整编译日志落盘（失败也保留）

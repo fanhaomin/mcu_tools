@@ -1,6 +1,7 @@
 "use strict";
 /**
- * 状态栏：显示当前忙/闲、最近一次构建或烧录结果摘要。
+ * 状态栏：工程/目标选择 + 编译 / 烧录 快捷按钮（一键执行，无需打开插件面板）。
+ * 不再有独立的状态摘要项——结果看按钮图标与输出通道。
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -63,15 +64,20 @@ class StatusBar {
     update(state) {
         // 工程/目标选择按钮（最左）：工程名·目标名，busy 时显示转圈
         const projectName = state.project?.name ??
-            (state.root ? state.root.split(/[\\/]/).filter((s) => s.length > 0).pop() : undefined);
-        this.projectBtn.text = state.busy !== 'none'
-            ? '$(sync~spin)'
-            : `$(folder) ${projectName ?? '选择工程'}${state.target ? `·${state.target}` : ''}`;
+            (state.root
+                ? state.root.split(/[\\/]/).filter((s) => s.length > 0).pop()
+                : undefined);
+        this.projectBtn.text =
+            state.busy !== 'none'
+                ? '$(sync~spin)'
+                : `$(folder) ${projectName ?? '选择工程'}${state.target ? `·${state.target}` : ''}`;
         this.projectBtn.tooltip = '选择工程或编译目标（Auto CMake Flash）';
         this.projectBtn.show();
         // 快捷按钮状态与显示
-        this.buildBtn.text = state.busy === 'build' ? '$(sync~spin) 编译中' : '$(zap) 编译';
-        this.flashBtn.text = state.busy === 'flash' ? '$(sync~spin) 烧录中' : '$(rocket) 烧录';
+        this.buildBtn.text =
+            state.busy === 'build' ? '$(sync~spin) 编译中' : '$(zap) 编译';
+        this.flashBtn.text =
+            state.busy === 'flash' ? '$(sync~spin) 烧录中' : '$(rocket) 烧录';
         this.buildBtn.show();
         this.flashBtn.show();
     }

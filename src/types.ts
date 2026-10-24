@@ -89,6 +89,8 @@ export interface BuildRecord {
   /** 该 ELF 在构建成功时刻的 mtime（Ninja 无改动时不会重写文件，靠此字段认可产物） */
   elfMtimeMs?: number;
   cancelled?: boolean;
+  /** 因超过 buildTimeoutSec 被终止 */
+  timedOut?: boolean;
 }
 
 /** 持久化在构建目录中的插件状态标记（同时作为“插件创建的目录”标记） */
@@ -105,8 +107,11 @@ export type ToolName =
   | 'armGpp'
   | 'objcopy'
   | 'size'
-  | 'programmerCli';
+  | 'programmerCli'
+  | 'armGdb'
+  | 'stlinkGdbServer';
 
+/** 核心组件：编译与烧录必需，任一缺失即视为环境不完整 */
 export const ALL_TOOL_NAMES: ToolName[] = [
   'cmake',
   'ninja',
@@ -117,6 +122,13 @@ export const ALL_TOOL_NAMES: ToolName[] = [
   'programmerCli',
 ];
 
+/**
+ * 调试组件：可选，不参与 complete/missing 判定。
+ * 缺失只影响调试功能（随 STM32CubeCLT 安装：gdb 在 GNU-tools-for-STM32，
+ * GDB Server 在 STM32CubeProgrammer/bin）。
+ */
+export const DEBUG_TOOL_NAMES: ToolName[] = ['armGdb', 'stlinkGdbServer'];
+
 export const TOOL_LABELS: Record<ToolName, string> = {
   cmake: 'CMake',
   ninja: 'Ninja',
@@ -125,6 +137,8 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   objcopy: 'arm-none-eabi-objcopy',
   size: 'arm-none-eabi-size',
   programmerCli: 'STM32CubeProgrammer CLI',
+  armGdb: 'ARM GDB (arm-none-eabi-gdb)',
+  stlinkGdbServer: 'ST-LINK GDB Server',
 };
 
 export interface ToolInfo {
@@ -212,11 +226,13 @@ export interface ParsedDiagnostic {
   message: string;
 }
 
-export type BusyKind = 'none' | 'configure' | 'build' | 'flash';
+export type BusyKind = 'none' | 'configure' | 'build' | 'flash' | 'debug';
 
 /** 插件在内存中维护的会话状态（供侧边栏/状态栏渲染） */
 export interface WorkspaceState {
   root?: string;
+  /** 用户通过目标选择器选中的 CMake 目标（add_executable/add_custom_target） */
+  target?: string;
   project?: ProjectInfo;
   toolchain?: ToolchainInfo;
   stlink?: StLinkInfo;

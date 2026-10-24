@@ -1,20 +1,42 @@
 /**
- * 侧边栏 TreeView：工程识别 / 环境状态 / 构建状态 / 烧录状态，
- * 每一行都绑定实际命令（点击即执行），不做占位界面。
+ * 侧边栏 TreeView：工程 / 开发环境 / 构建 / 烧录 / 调试 五个分区。
+ * 图标统一用 ThemeIcon（label 内不出现 $(codicon) 文字），行文案精简，详细数据放 tooltip。
  */
 
 import * as vscode from 'vscode';
 import {
   StLinkInfo,
+  ToolName,
   ToolchainInfo,
   WorkspaceState,
   Confidence,
   FlashOutcome,
 } from '../types';
-import { describeMcu } from '../detection/stm32Detector';
-import { missingToolAdvice } from '../detection/toolchainDetector';
 
 interface TreeNode extends vscode.TreeItem {}
+
+interface RowOpts {
+  icon?: string;
+  command?: string;
+  commandTitle?: string;
+  tooltip?: string;
+  contextValue?: string;
+}
+
+const TOOL_SHORT: Record<ToolName, string> = {
+  cmake: 'CMake',
+  ninja: 'Ninja',
+  armGcc: 'GCC',
+  armGpp: 'G++',
+  objcopy: 'ObjCopy',
+  size: 'Size',
+  programmerCli: 'CubeProg',
+  armGdb: 'GDB',
+  stlinkGdbServer: 'GDBServer',
+};
+const CORE_TOOLS: ToolName[] = ['cmake', 'ninja', 'armGcc', 'programmerCli'];
+/** 调试组件（可选，缺失不影响编译/烧录） */
+const DEBUG_TOOLS: ToolName[] = ['armGdb', 'stlinkGdbServer'];
 
 export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined>();
@@ -33,10 +55,11 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       return [
-        this.makeSection('$(file-directory) 工程', 'section-project'),
-        this.makeSection('$(tools) 开发环境', 'section-env'),
-        this.makeSection('$(build) 构建', 'section-build'),
-        this.makeSection('$(cloud-upload) 烧录', 'section-flash'),
+        this.section('工程', 'section-project', 'library'),
+        this.section('开发环境', 'section-env', 'tools'),
+        this.section('构建', 'section-build', 'build'),
+        this.section('烧录', 'section-flash', 'cloud-upload'),
+        this.section('调试', 'section-debug', 'bug'),
       ];
     }
     const s = this.state();
@@ -49,27 +72,25 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
         return this.buildRows(s);
       case 'section-flash':
         return this.flashRows(s);
+      case 'section-debug':
+        return this.debugRows(s);
       default:
         return [];
     }
   }
 
-  private makeSection(label: string, contextValue: string): TreeNode {
+  private section(label: string, contextValue: string, icon: string): TreeNode {
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
     item.contextValue = contextValue;
+    item.iconPath = new vscode.ThemeIcon(icon);
     return item;
   }
 
-  private row(
-    label: string,
-    opts: {
-      command?: string;
-      commandTitle?: string;
-      tooltip?: string;
-      contextValue?: string;
-    } = {},
-  ): TreeNode {
+  private row(label: string, opts: RowOpts = {}): TreeNode {
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    if (opts.icon) {
+      item.iconPath = new vscode.ThemeIcon(opts.icon);
+    }
     if (opts.command) {
       item.command = {
         command: opts.command,
@@ -86,63 +107,74 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
     const p = s.project;
     if (!p) {
       rows.push(
-        this.row('$(circle-slash) 尚未扫描工程（点击扫描）', {
+        this.row('未扫描工程（点击扫描）', {
+          icon: 'search',
           command: 'autoCmakeFlash.scanProject',
+          commandTitle: '扫描工程',
           tooltip: '扫描当前工作区，识别 STM32 工程结构',
         }),
       );
       return rows;
     }
+    const conf = `${confidenceLabel(p.mcu.confidence)}${p.mcu.confirmedByUser ? '（用户确认）' : ''}`;
+    const tipParts = [`工程路径: ${p.root}`, `可信度: ${conf}`];
+    if (p.mcu.evidence.length > 0) {
+      tipParts.push('识别证据:', ...p.mcu.evidence.map((e) => `${e.source}: ${e.detail}`));
+    }
     rows.push(
-      this.row(`$(folder-active) 工程: ${p.name}`, {
+      this.row(`${p.name} — ${p.mcu.model || '型号待确认'}`, {
+        icon: 'folder-active',
         command: 'autoCmakeFlash.scanProject',
         commandTitle: '重新扫描',
-        tooltip: p.root,
+        tooltip: tipParts.join('\n'),
       }),
     );
+    const marks = [
+      `CMakeLists ${p.hasCMakeLists ? '✔' : '✘'}`,
+      `.ioc ${p.hasIoc ? '✔' : '✘'}`,
+      `HAL ${p.hasHalDriver ? '✔' : '✘'}`,
+    ];
+    const missing: string[] = [];
+    if (!p.hasCMakeLists) {
+      missing.push('CMakeLists.txt');
+    }
+    if (!p.hasIoc) {
+      missing.push('.ioc');
+    }
+    if (!p.hasHalDriver) {
+      missing.push('HAL');
+    }
+    const ok = missing.length === 0;
+    const fileTip = [
+      p.cmakeListsPath ? `CMakeLists.txt: ${p.cmakeListsPath}` : 'CMakeLists.txt: 未找到',
+      p.iocPath ? `.ioc: ${p.iocPath}` : '.ioc: 未找到',
+      `CMSIS ${p.hasCmsis ? '✔' : '✘'}，启动文件 ${p.startupFiles.length} 个，链接脚本 ${p.linkerScripts.length} 个`,
+    ].join('\n');
     rows.push(
       this.row(
-        p.mcu.model
-          ? `$(chip) MCU: ${describeMcu(p.mcu)}`
-          : '$(warning) MCU: 芯片型号待确认（点击手动选择）',
+        ok
+          ? `工程文件: 就绪（${marks.join(' ')}）`
+          : `工程文件: 缺 ${missing.join('、')}（${marks.join(' ')}）`,
         {
-          command: 'autoCmakeFlash.chooseMcu',
-          commandTitle: '选择芯片型号',
-          tooltip:
-            p.mcu.evidence.length > 0
-              ? p.mcu.evidence.map((e) => `${e.source}: ${e.detail}`).join('\n')
-              : '未收集到芯片证据',
+          icon: ok ? 'check' : 'warning',
+          tooltip: fileTip,
         },
       ),
     );
-    rows.push(
-      this.row(
-        `$(shield) 识别可信度: ${confidenceLabel(p.mcu.confidence)}${p.mcu.confirmedByUser ? '（用户确认）' : ''}`,
-        { tooltip: p.mcu.warnings.join('\n') || '证据充分性评级' },
-      ),
-    );
-    rows.push(
-      this.row(
-        `$(json) CubeMX .ioc: ${p.hasIoc ? '✔ 已找到' : '✘ 未找到'}`,
-        { tooltip: p.iocPath ?? '无 .ioc 文件' },
-      ),
-    );
-    rows.push(
-      this.row(
-        `$(file-code) CMakeLists.txt: ${p.hasCMakeLists ? '✔ 已找到' : '✘ 未找到'}`,
-        { tooltip: p.cmakeListsPath ?? '无法进行 CMake 配置' },
-      ),
-    );
-    rows.push(
-      this.row(
-        `$(library) HAL/CMSIS: ${p.hasHalDriver ? 'HAL ✔' : 'HAL ✘'} / ${p.hasCmsis ? 'CMSIS ✔' : 'CMSIS ✘'}，` +
-          `启动文件 ${p.startupFiles.length} 个，链接脚本 ${p.linkerScripts.length} 个`,
-        { tooltip: '工程结构完整性' },
-      ),
-    );
+    if (p.hasIoc) {
+      rows.push(
+        this.row('在 STM32CubeMX 中打开 .ioc', {
+          icon: 'file-text',
+          command: 'autoCmakeFlash.openIoc',
+          commandTitle: '打开 .ioc',
+          tooltip: p.iocPath ?? undefined,
+        }),
+      );
+    }
     if (p.warnings.length > 0) {
       rows.push(
-        this.row(`$(alert) 识别警告 (${p.warnings.length})（点击查看）`, {
+        this.row(`识别警告（${p.warnings.length}）`, {
+          icon: 'warning',
           command: 'autoCmakeFlash.showWarnings',
           commandTitle: '查看识别警告',
           tooltip: p.warnings.join('\n'),
@@ -157,70 +189,80 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
     const tc: ToolchainInfo | undefined = s.toolchain;
     if (!tc) {
       rows.push(
-        this.row('$(circle-slash) 尚未检测环境（点击检测）', {
+        this.row('工具链: 未检测', {
+          icon: 'tools',
           command: 'autoCmakeFlash.detectEnvironment',
-          tooltip: '检测 CMake/Ninja/ARM GCC/STM32CubeProgrammer CLI',
+          commandTitle: '检测开发环境',
+          tooltip: '检测 CMake/Ninja/ARM GCC/STM32CubeProgrammer CLI 与调试组件',
         }),
       );
       return rows;
     }
-    const icon = (name: 'cmake' | 'ninja' | 'armGcc' | 'programmerCli') => {
-      const t = tc.tools[name];
-      const mark = t.found ? '$(check)' : '$(error)';
-      const ver = t.version ? ` ${t.version}` : '';
-      return `${mark} ${t.label.split(' (')[0]}:${ver}${t.found ? '' : ' 未找到'}`;
-    };
-    rows.push(
-      this.row(icon('cmake'), {
-        command: 'autoCmakeFlash.detectEnvironment',
-        commandTitle: '重新检测',
-        tooltip: toolTooltip(tc.tools.cmake),
-      }),
-    );
-    rows.push(
-      this.row(icon('ninja'), {
-        command: 'autoCmakeFlash.detectEnvironment',
-        commandTitle: '重新检测',
-        tooltip: toolTooltip(tc.tools.ninja),
-      }),
-    );
-    rows.push(
-      this.row(icon('armGcc'), {
-        command: 'autoCmakeFlash.detectEnvironment',
-        commandTitle: '重新检测',
-        tooltip: toolTooltip(tc.tools.armGcc),
-      }),
-    );
-    rows.push(
-      this.row(icon('programmerCli'), {
-        command: 'autoCmakeFlash.detectEnvironment',
-        commandTitle: '重新检测',
-        tooltip: toolTooltip(tc.tools.programmerCli),
-      }),
-    );
-    const st: StLinkInfo | undefined = s.stlink;
-    const stText = !st
-      ? '$(plug) ST-LINK: 未检测（点击检测）'
-      : st.status === 'probeDetected'
-        ? `$(plug) ST-LINK: 已检测到 ${st.probeCount} 个探头`
-        : st.status === 'noProbe'
-          ? '$(error) ST-LINK: 未检测到适配器（点击重试）'
-          : st.status === 'cliMissing'
-            ? '$(error) ST-LINK: CLI 未找到，无法检测'
-            : '$(question) ST-LINK: 检测结果未知（点击重试）';
-    rows.push(
-      this.row(stText, {
-        command: 'autoCmakeFlash.detectStLink',
-        commandTitle: '检测 ST-LINK',
-        tooltip: st?.error ?? (st?.probes.map((p) => `SN: ${p.serial ?? '?'}`).join('\n') || undefined),
-      }),
-    );
-    if (tc.missing.length > 0) {
+    if (tc.complete) {
       rows.push(
-        this.row(`$(lightbulb) 缺少 ${tc.missing.length} 个组件（点击查看解决方法）`, {
+        this.row('工具链: 就绪（CMake/Ninja/GCC/CubeProg）', {
+          icon: 'check',
+          command: 'autoCmakeFlash.detectEnvironment',
+          commandTitle: '重新检测',
+          tooltip: CORE_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
+        }),
+      );
+    } else {
+      rows.push(
+        this.row(`工具链: 缺 ${tc.missing.map((n) => TOOL_SHORT[n] ?? n).join('/')}`, {
+          icon: 'warning',
           command: 'autoCmakeFlash.showMissingTools',
           commandTitle: '查看解决方法',
-          tooltip: tc.missing.join(', '),
+          tooltip: CORE_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
+        }),
+      );
+    }
+    // 调试组件（可选，缺失不影响编译/烧录）
+    const dbgMissing = DEBUG_TOOLS.filter((n) => !tc.tools[n].found);
+    rows.push(
+      this.row(
+        dbgMissing.length === 0
+          ? '调试组件: 就绪（GDB/GDBServer）'
+          : `调试组件: 缺 ${dbgMissing.map((n) => TOOL_SHORT[n]).join('/')}（仅影响调试）`,
+        {
+          icon: dbgMissing.length === 0 ? 'check' : 'info',
+          command: 'autoCmakeFlash.detectEnvironment',
+          commandTitle: '重新检测',
+          tooltip: DEBUG_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
+        },
+      ),
+    );
+    const st: StLinkInfo | undefined = s.stlink;
+    if (!st) {
+      rows.push(
+        this.row('ST-LINK: 未检测', {
+          icon: 'plug',
+          command: 'autoCmakeFlash.detectStLink',
+          commandTitle: '检测 ST-LINK',
+        }),
+      );
+    } else if (st.status === 'probeDetected') {
+      rows.push(
+        this.row(`ST-LINK: 已检测到 ${st.probeCount} 个探头`, {
+          icon: 'plug',
+          command: 'autoCmakeFlash.detectStLink',
+          commandTitle: '检测 ST-LINK',
+          tooltip: st.probes.map((p) => `SN: ${p.serial ?? '?'}`).join('\n') || undefined,
+        }),
+      );
+    } else {
+      const text =
+        st.status === 'noProbe'
+          ? 'ST-LINK: 未检测到适配器'
+          : st.status === 'cliMissing'
+            ? 'ST-LINK: CLI 未找到，无法检测'
+            : 'ST-LINK: 检测结果未知';
+      rows.push(
+        this.row(text, {
+          icon: 'warning',
+          command: 'autoCmakeFlash.detectStLink',
+          commandTitle: '重试检测',
+          tooltip: st.error ?? undefined,
         }),
       );
     }
@@ -229,46 +271,53 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private buildRows(s: WorkspaceState): TreeNode[] {
     const rows: TreeNode[] = [];
+    rows.push(
+      this.row(`编译${s.target ? `目标 ${s.target}` : ''}`, {
+        icon: 'play',
+        command: 'autoCmakeFlash.build',
+        commandTitle: '编译',
+        tooltip: s.target ? '编译当前选中目标' : '编译全部（可在状态栏选择目标）',
+      }),
+    );
     const b = s.lastBuild;
-    if (!b) {
+    if (b?.success) {
       rows.push(
-        this.row('$(circle-slash) 最近编译: 未执行', {
-          command: 'autoCmakeFlash.build',
-          tooltip: '点击编译工程',
-        }),
-      );
-    } else if (b.success) {
-      rows.push(
-        this.row(`$(check) 最近编译: 成功（耗时 ${(b.durationMs / 1000).toFixed(1)}s）`, {
+        this.row(`最近编译: 成功 (${(b.durationMs / 1000).toFixed(1)}s)`, {
+          icon: 'check',
           command: 'autoCmakeFlash.showArtifacts',
           commandTitle: '查看产物',
           tooltip: `构建模式 ${b.buildType}，退出码 ${b.exitCode}`,
         }),
       );
-    } else {
+    } else if (b) {
       rows.push(
-        this.row(
-          `$(error) 最近编译: 失败（退出码 ${b.exitCode ?? '?'}${b.cancelled ? '，已取消' : ''}）`,
-          { command: 'autoCmakeFlash.showLogs', commandTitle: '查看日志', tooltip: '点击查看日志与问题面板' },
-        ),
+        this.row(`最近编译: 失败（退出码 ${b.exitCode ?? '?'}${b.cancelled ? '，已取消' : ''}）`, {
+          icon: 'warning',
+          command: 'autoCmakeFlash.showLogs',
+          commandTitle: '查看日志',
+          tooltip: '点击查看日志与问题面板',
+        }),
       );
     }
-    const p = s.project;
+    const count = s.project?.artifacts.length ?? 0;
     rows.push(
-      this.row(`$(file-binary) 当前构建产物: ${p?.artifacts.length ?? 0} 个（点击查看）`, {
+      this.row(`构建产物: ${count} 个`, {
+        icon: 'file-binary',
         command: 'autoCmakeFlash.showArtifacts',
         commandTitle: '查看构建产物',
         tooltip: 'ELF/HEX/BIN 文件列表',
       }),
     );
     rows.push(
-      this.row('$(folder-opened) 打开构建目录', {
+      this.row('打开构建目录', {
+        icon: 'folder-opened',
         command: 'autoCmakeFlash.openBuildDir',
         commandTitle: '打开构建目录',
       }),
     );
     rows.push(
-      this.row('$(trash) 清理插件构建目录', {
+      this.row('清理构建目录', {
+        icon: 'trash',
         command: 'autoCmakeFlash.clean',
         commandTitle: '清理构建目录',
       }),
@@ -279,42 +328,54 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
   private flashRows(s: WorkspaceState): TreeNode[] {
     const rows: TreeNode[] = [];
     const f: FlashOutcome | undefined = s.lastFlash;
-    if (!f) {
-      rows.push(this.row('$(circle-slash) 最近烧录: 未执行'));
-    } else {
-      const icon =
-        f.status === 'success'
-          ? '$(check)'
-          : f.status === 'verify-unconfirmed'
-            ? '$(question)'
-            : '$(error)';
+    if (f) {
+      const ok = f.status === 'success';
+      const tipParts = [`下载: ${f.downloaded ? '成功' : '失败'} / 校验: ${verifyText(f.verify)}`];
+      if (f.messages.length > 0) {
+        tipParts.push(...f.messages);
+      }
       rows.push(
-        this.row(`${icon} 最近烧录: ${flashStatusText(f)}`, {
+        this.row(`最近烧录: ${ok ? '成功' : flashStatusText(f)}`, {
+          icon: ok ? 'check' : 'warning',
           command: 'autoCmakeFlash.showLogs',
           commandTitle: '查看日志',
-          tooltip: f.messages.join('\n') || undefined,
+          tooltip: tipParts.join('\n'),
         }),
-      );
-      rows.push(
-        this.row(
-          `$(shield) 下载: ${f.downloaded ? '成功' : '失败'} / 校验: ${verifyText(f.verify)}`,
-          { command: 'autoCmakeFlash.showLogs', commandTitle: '查看日志' },
-        ),
       );
     }
     rows.push(
-      this.row('$(cloud-upload) 编译并烧录', {
+      this.row('编译并烧录', {
+        icon: 'cloud-upload',
         command: 'autoCmakeFlash.buildAndFlash',
         commandTitle: '编译并烧录',
       }),
     );
     rows.push(
-      this.row('$(rocket) 烧录现有固件', {
+      this.row('烧录现有固件', {
+        icon: 'rocket',
         command: 'autoCmakeFlash.flashExisting',
         commandTitle: '烧录现有固件',
       }),
     );
     return rows;
+  }
+
+  private debugRows(_s: WorkspaceState): TreeNode[] {
+    return [
+      this.row('编译并调试', {
+        icon: 'debug-alt',
+        command: 'autoCmakeFlash.debug',
+        commandTitle: '编译并调试',
+        tooltip:
+          '编译成功后启动 ST-LINK 调试会话（cortex-debug：ST-LINK GDB Server + arm-none-eabi-gdb），\n固件经 gdb load 写入芯片并运行到 main 断点。',
+      }),
+      this.row('附加到运行中的目标', {
+        icon: 'debug-disconnect',
+        command: 'autoCmakeFlash.debugAttach',
+        commandTitle: '附加调试',
+        tooltip: '不重新编译、不写固件，直接连接正在运行的目标芯片调试。',
+      }),
+    ];
   }
 }
 
@@ -331,11 +392,14 @@ function confidenceLabel(c: Confidence): string {
   }
 }
 
-function toolTooltip(t: { found: boolean; path?: string; version?: string; error?: string; searched: string[] }): string {
+function toolTooltip(
+  t: { found: boolean; path?: string; version?: string; error?: string },
+  short: string,
+): string {
   if (t.found) {
-    return `${t.path ?? ''}\n版本: ${t.version ?? '未知'}${t.error ? `\n注意: ${t.error}` : ''}`;
+    return `${short}: ${t.version ?? '版本未知'}\n${t.path ?? ''}${t.error ? `\n注意: ${t.error}` : ''}`;
   }
-  return `${t.error ?? '未找到'}\n搜索过的路径:\n${t.searched.join('\n') || '(无)'}`;
+  return `${short}: 未找到 — ${t.error ?? '原因未知'}`;
 }
 
 export function flashStatusText(f: FlashOutcome): string {

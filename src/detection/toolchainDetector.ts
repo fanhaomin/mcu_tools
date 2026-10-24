@@ -54,6 +54,11 @@ interface ToolSpec {
   cubeCltSubDirs: string[];
   /** 与 CubeCLT 无关的固定候选目录 */
   fixedDirs: (platform: NodeJS.Platform) => string[];
+  /**
+   * 可选组件（调试工具等）：参与检测但不算入 complete/missing，
+   * 缺失只影响对应功能而不阻塞编译/烧录。
+   */
+  optional?: boolean;
 }
 
 const isWin = () => process.platform === 'win32';
@@ -141,6 +146,33 @@ const TOOL_SPECS: ToolSpec[] = [
             'C:\\Program Files (x86)\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin',
           ]
         : ['/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin'],
+  },
+  {
+    name: 'armGdb',
+    exe: exeName('arm-none-eabi-gdb'),
+    versionArgs: ['--version'],
+    versionRegex: /GNU gdb \(.*?\)\s+v?(\d+\.\d+(?:\.\d+)?)/i,
+    cubeCltSubDirs: [path.join('GNU-tools-for-STM32', 'bin')],
+    fixedDirs: (platform) =>
+      platform === 'win32'
+        ? ['C:\\Program Files (x86)\\GNU Arm Embedded Toolchain\\bin', 'C:\\Program Files\\GNU Arm Embedded Toolchain\\bin']
+        : ['/usr/bin'],
+    optional: true,
+  },
+  {
+    name: 'stlinkGdbServer',
+    exe: exeName('ST-LINK_gdbserver'),
+    versionArgs: ['--version'],
+    versionRegex: /version[^\d\r\n]*v?(\d+\.\d+(?:\.\d+)?)/i,
+    cubeCltSubDirs: [path.join('STM32CubeProgrammer', 'bin')],
+    fixedDirs: (platform) =>
+      platform === 'win32'
+        ? [
+            'C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin',
+            'C:\\Program Files (x86)\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin',
+          ]
+        : ['/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin'],
+    optional: true,
   },
 ];
 
@@ -230,7 +262,7 @@ export interface ToolchainDetectionOptions {
   /**
    * 用户设置中的覆盖路径：
    * - cmake/ninja/programmerCli：完整可执行文件路径或命令名
-   * - armGcc：gcc 完整路径，或工具链 bin 目录（目录形式会同时解析出 g++/objcopy/size）
+   * - armGcc：gcc 完整路径，或工具链 bin 目录（目录形式会同时解析出 g++/objcopy/size/gdb）
    */
   overrides?: Partial<Record<ToolName, string>>;
   /** 额外的 STM32CubeCLT 搜索根目录 */
@@ -261,12 +293,14 @@ export function resolveArmToolchainSetting(
       out.armGpp = path.join(dir, exeName('arm-none-eabi-g++'));
       out.objcopy = path.join(dir, exeName('arm-none-eabi-objcopy'));
       out.size = path.join(dir, exeName('arm-none-eabi-size'));
+      out.armGdb = path.join(dir, exeName('arm-none-eabi-gdb'));
     } else {
       // 目录形式
       out.armGcc = path.join(p, exeName('arm-none-eabi-gcc'));
       out.armGpp = path.join(p, exeName('arm-none-eabi-g++'));
       out.objcopy = path.join(p, exeName('arm-none-eabi-objcopy'));
       out.size = path.join(p, exeName('arm-none-eabi-size'));
+      out.armGdb = path.join(p, exeName('arm-none-eabi-gdb'));
     }
   }
   return out;
@@ -397,6 +431,10 @@ export function missingToolAdvice(missing: ToolName[]): string[] {
         return `缺少 ${TOOL_LABELS[name]}: 随 ARM GNU 工具链一起安装（bin 目录）。`;
       case 'programmerCli':
         return '缺少 STM32CubeProgrammer CLI: 请安装 STM32CubeCLT 或单独安装 STM32CubeProgrammer，或在设置 autoCmakeFlash.programmerCliPath 中指定 STM32_Programmer_CLI.exe 路径。';
+      case 'armGdb':
+        return '缺少 ARM GDB: 请安装 STM32CubeCLT（GNU-tools-for-STM32 自带 arm-none-eabi-gdb），或在设置 autoCmakeFlash.gdbPath 中指定。';
+      case 'stlinkGdbServer':
+        return '缺少 ST-LINK GDB Server: 随 STM32CubeProgrammer 一起安装（bin 目录），或在设置 autoCmakeFlash.gdbServerPath 中指定。';
       default:
         return `缺少组件: ${name}`;
     }

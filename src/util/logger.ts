@@ -19,15 +19,6 @@ export class MemoryLogSink implements LogSink {
   }
 }
 
-function timestamp(): string {
-  const d = new Date();
-  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
-  );
-}
-
 export class Logger {
   constructor(
     private readonly sink: LogSink,
@@ -36,7 +27,8 @@ export class Logger {
 
   private write(level: string, msg: string): void {
     for (const line of String(msg).split(/\r?\n/)) {
-      this.sink.appendLine(`[${timestamp()}] [${level}] ${line}`);
+      // INFO 直接输出；WARN/ERROR/DEBUG 保留短标记便于扫读（时间戳可由输出面板自带功能显示）
+      this.sink.appendLine(level === 'INFO' ? line : `[${level}] ${line}`);
     }
   }
 

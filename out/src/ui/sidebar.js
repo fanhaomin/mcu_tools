@@ -1,6 +1,6 @@
 "use strict";
 /**
- * 侧边栏 TreeView：工程 / 开发环境 / 构建 / 烧录 四个分区。
+ * 侧边栏 TreeView：工程 / 开发环境 / 构建 / 烧录 / 调试 五个分区。
  * 图标统一用 ThemeIcon（label 内不出现 $(codicon) 文字），行文案精简，详细数据放 tooltip。
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -12,8 +12,7 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
     Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    if (k2 in o) Object.defineProperty(o, k2, { enumerable: true, value: o[k2] });
-    else o[k2] = m[k];
+    o[k2] = m[k];
 }));
 var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
@@ -50,8 +49,12 @@ const TOOL_SHORT = {
     objcopy: 'ObjCopy',
     size: 'Size',
     programmerCli: 'CubeProg',
+    armGdb: 'GDB',
+    stlinkGdbServer: 'GDBServer',
 };
 const CORE_TOOLS = ['cmake', 'ninja', 'armGcc', 'programmerCli'];
+/** 调试组件（可选，缺失不影响编译/烧录） */
+const DEBUG_TOOLS = ['armGdb', 'stlinkGdbServer'];
 class SidebarProvider {
     state;
     _onDidChangeTreeData = new vscode.EventEmitter();
@@ -72,6 +75,7 @@ class SidebarProvider {
                 this.section('开发环境', 'section-env', 'tools'),
                 this.section('构建', 'section-build', 'build'),
                 this.section('烧录', 'section-flash', 'cloud-upload'),
+                this.section('调试', 'section-debug', 'bug'),
             ];
         }
         const s = this.state();
@@ -84,6 +88,8 @@ class SidebarProvider {
                 return this.buildRows(s);
             case 'section-flash':
                 return this.flashRows(s);
+            case 'section-debug':
+                return this.debugRows(s);
             default:
                 return [];
         }
@@ -159,6 +165,14 @@ class SidebarProvider {
             icon: ok ? 'check' : 'warning',
             tooltip: fileTip,
         }));
+        if (p.hasIoc) {
+            rows.push(this.row('在 STM32CubeMX 中打开 .ioc', {
+                icon: 'file-text',
+                command: 'autoCmakeFlash.openIoc',
+                commandTitle: '打开 .ioc',
+                tooltip: p.iocPath ?? undefined,
+            }));
+        }
         if (p.warnings.length > 0) {
             rows.push(this.row(`识别警告（${p.warnings.length}）`, {
                 icon: 'warning',
@@ -177,10 +191,11 @@ class SidebarProvider {
                 icon: 'tools',
                 command: 'autoCmakeFlash.detectEnvironment',
                 commandTitle: '检测开发环境',
-                tooltip: '检测 CMake/Ninja/ARM GCC/STM32CubeProgrammer CLI',
+                tooltip: '检测 CMake/Ninja/ARM GCC/STM32CubeProgrammer CLI 与调试组件',
             }));
+            return rows;
         }
-        else if (tc.complete) {
+        if (tc.complete) {
             rows.push(this.row('工具链: 就绪（CMake/Ninja/GCC/CubeProg）', {
                 icon: 'check',
                 command: 'autoCmakeFlash.detectEnvironment',
@@ -196,6 +211,16 @@ class SidebarProvider {
                 tooltip: CORE_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
             }));
         }
+        // 调试组件（可选，缺失不影响编译/烧录）
+        const dbgMissing = DEBUG_TOOLS.filter((n) => !tc.tools[n].found);
+        rows.push(this.row(dbgMissing.length === 0
+            ? '调试组件: 就绪（GDB/GDBServer）'
+            : `调试组件: 缺 ${dbgMissing.map((n) => TOOL_SHORT[n]).join('/')}（仅影响调试）`, {
+            icon: dbgMissing.length === 0 ? 'check' : 'info',
+            command: 'autoCmakeFlash.detectEnvironment',
+            commandTitle: '重新检测',
+            tooltip: DEBUG_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
+        }));
         const st = s.stlink;
         if (!st) {
             rows.push(this.row('ST-LINK: 未检测', {
@@ -229,11 +254,11 @@ class SidebarProvider {
     }
     buildRows(s) {
         const rows = [];
-        rows.push(this.row(`编译`, {
+        rows.push(this.row(`编译${s.target ? `目标 ${s.target}` : ''}`, {
             icon: 'play',
             command: 'autoCmakeFlash.build',
             commandTitle: '编译',
-            tooltip: '编译当前选中目标',
+            tooltip: s.target ? '编译当前选中目标' : '编译全部（可在状态栏选择目标）',
         }));
         const b = s.lastBuild;
         if (b?.success) {
@@ -298,6 +323,22 @@ class SidebarProvider {
             commandTitle: '烧录现有固件',
         }));
         return rows;
+    }
+    debugRows(_s) {
+        return [
+            this.row('编译并调试', {
+                icon: 'debug-alt',
+                command: 'autoCmakeFlash.debug',
+                commandTitle: '编译并调试',
+                tooltip: '编译成功后启动 ST-LINK 调试会话（cortex-debug：ST-LINK GDB Server + arm-none-eabi-gdb），\n固件经 gdb load 写入芯片并运行到 main 断点。',
+            }),
+            this.row('附加到运行中的目标', {
+                icon: 'debug-disconnect',
+                command: 'autoCmakeFlash.debugAttach',
+                commandTitle: '附加调试',
+                tooltip: '不重新编译、不写固件，直接连接正在运行的目标芯片调试。',
+            }),
+        ];
     }
 }
 exports.SidebarProvider = SidebarProvider;

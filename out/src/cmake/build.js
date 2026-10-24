@@ -135,12 +135,12 @@ async function buildProject(input) {
     const cacheInfo = await readCMakeCacheInfo(input.buildDir);
     const multiConfig = /Visual Studio|Xcode|Ninja Multi-Config/i.test(cacheInfo.generator ?? '');
     const args = ['--build', input.buildDir, '--parallel'];
+    if (multiConfig) {
+        args.push('--config', input.buildType);
+    }
     if (input.target) {
         // 用户指定了 CMake 目标（状态栏目标选择）：只构建该目标
         args.push('--target', input.target);
-    }
-    if (multiConfig) {
-        args.push('--config', input.buildType);
     }
     log(`开始编译${input.target ? ` 目标 ${input.target}` : ''} (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`);
     const result = await (0, process_1.execFileSafe)(input.cmakePath, args, {
@@ -155,7 +155,10 @@ async function buildProject(input) {
     let elfMtimeMs;
     if (success) {
         const artifacts = await (0, artifacts_1.findArtifacts)(input.buildDir);
-        const elf = artifacts.find((a) => a.format === 'elf');
+        // 选了目标时优先锁定 <目标名>.elf，防止多目标工程误认到"最新链接"的另一个 ELF
+        const want = input.target ? `${input.target.toLowerCase()}.elf` : undefined;
+        const elf = (want ? artifacts.find((a) => a.path.toLowerCase().endsWith(want)) : undefined) ??
+            artifacts.find((a) => a.format === 'elf');
         elfPath = elf?.path;
         elfMtimeMs = elf?.mtimeMs;
     }
@@ -173,6 +176,7 @@ async function buildProject(input) {
         elfPath,
         elfMtimeMs,
         cancelled: result.cancelled || undefined,
+        timedOut: result.timedOut || undefined,
     };
     // 持久化构建记录（烧录流程以此为门禁）+ 完整编译日志落盘（失败也保留）
     const state = await (0, artifacts_1.readPersistedState)(input.buildDir);

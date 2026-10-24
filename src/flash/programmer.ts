@@ -95,6 +95,18 @@ export async function performFlash(deps: FlashDeps): Promise<FlashOutcome> {
   const { log, cli, settings } = deps;
   const messages: string[] = [];
 
+  /** 精简 CLI 成功输出：只保留关键信息行（进度条乱码/横幅/设备信息块/空行全部剔除） */
+  const compactCliOutput = (text: string): string => {
+    const keep =
+      /(^\s*File\s*:|^\s*Size\s*:|^\s*Address\s*:|Erasing internal|Erasing memory|download complete|Time elapsed|Download verified|Download in Progress)/i;
+    return String(text ?? '')
+      .replace(/\ufffd+/g, '')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\s+$/, ''))
+      .filter((l) => l.length > 0 && keep.test(l))
+      .join('\n');
+  };
+
   // 1. 前置门禁
   if (!deps.precheck.ok) {
     const blocker = deps.precheck.blockers.join(' ');
@@ -153,8 +165,9 @@ export async function performFlash(deps: FlashDeps): Promise<FlashOutcome> {
   });
   const target = parseConnectResult(connRun.stdout, connRun.exitCode);
   log(`目标连接状态: ${describeTarget(target)}`);
-  log(`连接命令原始输出:\n${connRun.stdout}${connRun.stderr ? `\n[stderr]\n${connRun.stderr}` : ''}`);
   if (!target.connected) {
+    // 连接成功时不再倒出完整原始输出，仅在失败时保留完整记录便于排查
+    log(`连接命令原始输出:\n${connRun.stdout}${connRun.stderr ? `\n[stderr]\n${connRun.stderr}` : ''}`);
     const hints = stlinkFailureHints(`${connRun.stdout}\n${connRun.stderr}`);
     messages.push(
       `目标芯片无法连接（${target.error ?? '未知原因'}）`,
@@ -213,7 +226,11 @@ export async function performFlash(deps: FlashDeps): Promise<FlashOutcome> {
   });
   const dl = parseDownloadResult(dlRun.stdout, dlRun.exitCode, true);
   log(`烧录命令退出码: ${dlRun.exitCode}；下载判定: ${dl.downloaded ? '成功' : '失败'}；校验判定: ${dl.verify}`);
-  log(`烧录命令原始输出:\n${dlRun.stdout}${dlRun.stderr ? `\n[stderr]\n${dlRun.stderr}` : ''}`);
+  if (dl.downloaded) {
+    log(`烧录过程:\n${compactCliOutput(dlRun.stdout)}`);
+  } else {
+    log(`烧录命令原始输出（失败，完整记录）:\n${dlRun.stdout}${dlRun.stderr ? `\n[stderr]\n${dlRun.stderr}` : ''}`);
+  }
   messages.push(...dl.notes);
 
   // 7. 复位（仅在下载成功时执行）

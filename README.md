@@ -7,8 +7,9 @@ STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录与校验一体化
 ## 功能总览
 
 - **工程自动识别**：扫描工作区中的 `CMakeLists.txt`、CubeMX `.ioc`、`Core/Inc`、`Core/Src`、`Drivers/STM32xx_HAL_Driver`、`Drivers/CMSIS`、`startup_stm32xxxx.s`、链接脚本 `.ld`、已有构建目录与 `.elf/.hex/.bin` 产物。
+- **在线调试**：自动生成 cortex-debug 调试配置（ST-LINK GDB Server + arm-none-eabi-gdb，均随 STM32CubeCLT 安装）。「编译并调试」一键编译并停在 `main`；「附加调试」连接正在运行的目标，不写固件。可选 SVD 文件提供外设寄存器视图。
 - **芯片型号推断（多证据加权）**：综合 `.ioc`、编译宏 `-DSTM32xxxx`、CMakeLists、工具链文件、链接脚本名、启动文件名、HAL 目录。输出**型号 + 可信度（高/中/低）+ 证据列表**；证据不足时明确显示"芯片型号待确认"，可手动选择，绝不凭文件夹名虚构型号。
-- **工具链自动检测**：`cmake` / `ninja` / `arm-none-eabi-gcc|g++|objcopy|size` / `STM32_Programmer_CLI.exe`。搜索顺序：用户设置 → 系统 PATH → STM32CubeCLT 默认目录。找到文件后**必须运行版本命令确认可用**，未找到时给出原因、搜索过的路径与安装建议。
+- **工具链自动检测**：`cmake` / `ninja` / `arm-none-eabi-gcc|g++|objcopy|size` / `STM32_Programmer_CLI.exe` 7 个核心组件，另检测 2 个调试组件 `arm-none-eabi-gdb` / `ST-LINK_gdbserver`（可选，缺失不影响编译烧录）。搜索顺序：用户设置 → 系统 PATH → STM32CubeCLT 默认目录。找到文件后**必须运行版本命令确认可用**，未找到时给出原因、搜索过的路径与安装建议。
 - **CMake 配置**：只使用插件专用目录（默认 `build-auto`），不覆盖用户 CMakeLists.txt 与已有构建目录；工程已自带工具链配置（如 CubeMX 生成的 CMake 工程）时**不注入** `CMAKE_TOOLCHAIN_FILE`；Ninja 缺失时提示安装或切换生成器。
 - **编译**：`cmake --build <build-auto> --parallel`，支持取消与超时；失败时解析编译器错误（文件:行:列）写入 VS Code 问题面板；完整日志落盘 `build-auto/auto-cmake-flash-last-build.log` 并记录到输出通道。
 - **防误烧旧固件**：每次构建生成独立 `BuildRecord`（成功/失败、时间戳），持久化于 `build-auto/auto-cmake-flash.buildstate.json`。烧录前校验：最近一次构建**成功**且产物 mtime **晚于构建开始时间**，任一不满足即阻止。
@@ -57,6 +58,8 @@ code --install-extension auto-cmake-flash-0.1.0.vsix
 | 重新配置并编译 | 先配置后编译 |
 | 编译并烧录 | 一次任务内完成编译→烧录门禁→确认→烧录 |
 | 烧录现有固件 | 显式选择烧录已有产物（不要求本次构建，确认窗口显著提示） |
+| 编译并调试 | 编译成功后启动 ST-LINK 调试会话：固件经 gdb load 写入并停在 `main`（需 cortex-debug 扩展，未安装时引导安装） |
+| 附加调试运行中的目标 | 不重新编译、不写固件，直接连接正在运行的目标芯片 |
 | 清理插件构建目录 | 仅 `build-auto`；非插件创建的目录需额外确认 |
 | 打开构建目录 / 显示构建产物信息 / 定位 ELF 文件 | 资源管理器打开 / QuickPick 列表 / 系统文件管理器定位 |
 | 手动选择芯片型号 | 证据不足时人工确认型号 |
@@ -70,7 +73,10 @@ code --install-extension auto-cmake-flash-0.1.0.vsix
 | `buildType` | `Debug` | Debug / Release / RelWithDebInfo / MinSizeRel |
 | `generator` | `Ninja` | CMake 生成器；Ninja 缺失时可改 `"MinGW Makefiles"` 等 |
 | `cmakePath` / `ninjaPath` / `programmerCliPath` | 空 | 手动指定可执行文件完整路径 |
-| `armToolchainPath` | 空 | ARM GCC 的 bin 目录或 `arm-none-eabi-gcc.exe` 完整路径 |
+| `armToolchainPath` | 空 | ARM GCC 的 bin 目录或 `arm-none-eabi-gcc.exe` 完整路径（自动推导同目录 gdb 等工具） |
+| `gdbPath` | 空 | `arm-none-eabi-gdb` 完整路径（调试用，留空自动检测） |
+| `gdbServerPath` | 空 | `ST-LINK_gdbserver` 完整路径（调试用，随 STM32CubeProgrammer 安装，留空自动检测） |
+| `svdFile` | 空 | SVD 文件路径，调试时显示外设寄存器视图（可选） |
 | `cmakeToolchainFile` | 空 | 可选自定义工具链文件 |
 | `cmakeExtraArgs` | 空 | 追加的 CMake 配置参数（支持引号内空格） |
 | `downloadInterface` | `SWD` | SWD / JTAG |
@@ -122,7 +128,7 @@ npm run compile
 npm test          # tsc + node --test out/test/**/*.test.js
 ```
 
-覆盖场景：CubeMX CMake 工程识别 / 普通 CMake 工程识别 / 芯片宏提取 / 链接脚本识别 / 工具链缺失及原因 / 版本命令失败 / 覆盖优先级 / 路径含空格（真实进程）/ ELF/HEX/BIN 识别与选择 / 构建失败阻止烧录 / 旧产物阻止烧录 / 型号不确定阻止烧录 / BIN 无地址阻止烧录 / 无 ST-LINK / 用户取消烧录 / 连接失败 / 下载失败 / 校验失败 / 校验未确认 / 成功路径参数与确认窗口内容。
+覆盖场景：CubeMX CMake 工程识别 / 普通 CMake 工程识别 / 芯片宏提取 / 链接脚本识别 / 工具链缺失及原因 / 版本命令失败 / 覆盖优先级 / 路径含空格（真实进程）/ ELF/HEX/BIN 识别与选择 / 构建失败阻止烧录 / 旧产物阻止烧录 / 型号不确定阻止烧录 / BIN 无地址阻止烧录 / 无 ST-LINK / 用户取消烧录 / 连接失败 / 下载失败 / 校验失败 / 校验未确认 / 成功路径参数与确认窗口内容 / cortex-debug 配置生成与构建类型判定 / 调试工具可选性。
 
 需要真实硬件/工具链的验证项单独列出（见下"实机验证流程"），不在单元测试中依赖。
 
@@ -163,6 +169,18 @@ npm run package              # npx vsce package --allow-missing-repository --no-
 - **缺失 CPU 编译选项自愈**：编译报 `selected processor does not support 'wfe'/'cpsid i' in ARM mode` 说明工程没提供 `-mcpu/-mthumb`（常见于 CubeMX/CLion 转换工程）。插件会弹窗征求同意，生成保留工程原工具链设置、并按识别出的芯片家族自动补齐 CPU 选项的工具链文件（F1→cortex-m3、F4/G4/L4→cortex-m4、H7→cortex-m7 等），重新配置并编译。
 - **`.idea` 目录**被忽略，不参与识别与产物扫描。
 - 在 CLion 与 VS Code/Trae 之间切换无需任何配置：两边各自使用独立构建目录，共享同一份源码。
+
+## 调试（cortex-debug）
+
+插件通过 [cortex-debug](https://marketplace.visualstudio.com/items?itemName=marus25.cortex-debug) 扩展提供 STM32 在线调试（ST 官方 VS Code 插件同样基于它）。首次使用时会引导安装。
+
+- **自动生成的调试配置**：ELF 路径、芯片型号、SWD/JTAG、`ST-LINK_gdbserver` 与 `arm-none-eabi-gdb` 路径全部来自已有检测结果，零配置。
+- **编译并调试**：编译成功 → 启动调试会话 → 固件由调试器经 gdb load 写入芯片 → 运行到 `main` 停下。此路径不使用 STM32CubeProgrammer，避免与调试器争抢 ST-LINK。
+- **附加调试**：不重新编译、不写固件，连接正在运行的目标。
+- **构建类型检查**：构建类型为 Release/MinSizeRel（ELF 无调试信息）时，启动前提示确认。
+- **依赖组件**：`arm-none-eabi-gdb`（STM32CubeCLT 的 GNU-tools-for-STM32）与 `ST-LINK_gdbserver`（STM32CubeProgrammer 的 bin 目录）。两者作为可选组件参与环境检测，缺失时只影响调试。
+- **外设寄存器视图**：在设置 `autoCmakeFlash.svdFile` 中指定芯片对应的 SVD 文件（可从 STM32CubeMX 安装目录或 ST 官网获取）。
+- **扩展到其他芯片家族**：调试层按「后端」抽象（`src/debug/`，与烧录后端同构）。Cortex-M 家族（STM32/GD32/CH32 非 V）共用 cortex-debug 后端；RISC-V（CH32V 系列）与 ESP32 将来接入 cdt-gdb-vscode 通用 GDB 适配器 + 厂商 OpenOCD，只需新增一个后端并按芯片家族分发。
 
 ## 已知限制
 

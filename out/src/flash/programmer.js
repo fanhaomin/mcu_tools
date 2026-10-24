@@ -85,6 +85,16 @@ function describeTarget(t) {
 async function performFlash(deps) {
     const { log, cli, settings } = deps;
     const messages = [];
+    /** 精简 CLI 成功输出：只保留关键信息行（进度条乱码/横幅/设备信息块/空行全部剔除） */
+    const compactCliOutput = (text) => {
+        const keep = /(^\s*File\s*:|^\s*Size\s*:|^\s*Address\s*:|Erasing internal|Erasing memory|download complete|Time elapsed|Download verified|Download in Progress)/i;
+        return String(text ?? '')
+            .replace(/\ufffd+/g, '')
+            .split(/\r?\n/)
+            .map((l) => l.replace(/\s+$/, ''))
+            .filter((l) => l.length > 0 && keep.test(l))
+            .join('\n');
+    };
     // 1. 前置门禁
     if (!deps.precheck.ok) {
         const blocker = deps.precheck.blockers.join(' ');
@@ -107,16 +117,6 @@ async function performFlash(deps) {
     }
     // 3. ST-LINK 探头检测（硬件在线 ≠ 软件已安装）
     log(`检测 ST-LINK 探头: "${cli.cliPath}" -l`);
-    /** 精简 CLI 成功输出：只保留关键信息行（进度条乱码/横幅/设备信息块/空行全部剔除） */
-    const compactCliOutput = (text) => {
-        const keep = /(^\s*File\s*:|^\s*Size\s*:|^\s*Address\s*:|Erasing internal|Erasing memory|download complete|Time elapsed|Download verified|Download in Progress)/i;
-        return String(text ?? '')
-            .replace(/\ufffd+/g, '')
-            .split(/\r?\n/)
-            .map((l) => l.replace(/\s+$/, ''))
-            .filter((l) => l.length > 0 && keep.test(l))
-            .join('\n');
-    };
     const probeRun = await cli.listProbes();
     const probes = (0, verification_1.parseProbeList)(probeRun.stdout);
     log(`探头检测结果: ${probes.count} 个；退出码 ${probeRun.exitCode}` +
@@ -151,8 +151,6 @@ async function performFlash(deps) {
     if (!target.connected) {
         // 连接成功时不再倒出完整原始输出，仅在失败时保留完整记录便于排查
         log(`连接命令原始输出:\n${connRun.stdout}${connRun.stderr ? `\n[stderr]\n${connRun.stderr}` : ''}`);
-    }
-    if (!target.connected) {
         const hints = (0, verification_1.stlinkFailureHints)(`${connRun.stdout}\n${connRun.stderr}`);
         messages.push(`目标芯片无法连接（${target.error ?? '未知原因'}）`, ...hints);
         return {

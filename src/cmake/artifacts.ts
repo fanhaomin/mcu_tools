@@ -109,6 +109,8 @@ export interface FlashPrecheckInput {
   lastBuild?: BuildRecord;
   /** 当前可见的固件产物 */
   artifacts: FirmwareArtifact[];
+  /** 调用方显式指定的产物（如按目标名选择的固件），优先于自动选择 */
+  artifact?: FirmwareArtifact;
   /** 芯片型号结论 */
   mcu: McuInfo;
   /** BIN 烧录地址（已由设置或用户输入提供） */
@@ -157,8 +159,8 @@ export function checkFlashPreconditions(input: FlashPrecheckInput): FlashPrechec
     return finish();
   }
 
-  // 3. 选择产物
-  const artifact = selectFirmware(input.artifacts);
+  // 3. 选择产物（调用方显式指定时以调用方为准，如按目标名选择的固件）
+  const artifact = input.artifact ?? selectFirmware(input.artifacts);
   if (!artifact) {
     blockers.push('固件产物格式无法识别。');
     return finish();

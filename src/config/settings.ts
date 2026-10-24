@@ -13,6 +13,18 @@ export interface AutoCmakeFlashSettings {
   ninjaPath: string;
   armToolchainPath: string;
   programmerCliPath: string;
+  /** arm-none-eabi-gdb 完整路径（调试用，留空自动检测） */
+  gdbPath: string;
+  /** ST-LINK_gdbserver 完整路径（调试用，留空自动检测） */
+  gdbServerPath: string;
+  /** STM32CubeMX.exe 完整路径（打开 .ioc 用，留空自动检测） */
+  cubemxPath: string;
+  /** 调试引擎：cortex-debug（ST-LINK GDB Server）或 probe-rs（直连 DAP，支持运行中读寄存器） */
+  debugEngine: 'cortex-debug' | 'probe-rs';
+  /** probe-rs 芯片名覆盖（如 STM32F103C8；留空按识别的型号自动推导） */
+  probeRsChip: string;
+  /** SVD 文件路径（调试时显示外设寄存器视图，可选） */
+  svdFile: string;
   cmakeToolchainFile: string;
   cmakeExtraArgs: string;
   downloadInterface: 'SWD' | 'JTAG';
@@ -47,6 +59,13 @@ export function loadSettings(): AutoCmakeFlashSettings {
     ninjaPath: cfg.get<string>('ninjaPath', ''),
     armToolchainPath: cfg.get<string>('armToolchainPath', ''),
     programmerCliPath: cfg.get<string>('programmerCliPath', ''),
+    gdbPath: cfg.get<string>('gdbPath', ''),
+    gdbServerPath: cfg.get<string>('gdbServerPath', ''),
+    cubemxPath: cfg.get<string>('cubemxPath', ''),
+    debugEngine:
+      cfg.get<string>('debugEngine', 'cortex-debug') === 'probe-rs' ? 'probe-rs' : 'cortex-debug',
+    probeRsChip: cfg.get<string>('probeRsChip', ''),
+    svdFile: cfg.get<string>('svdFile', ''),
     cmakeToolchainFile: cfg.get<string>('cmakeToolchainFile', ''),
     cmakeExtraArgs: cfg.get<string>('cmakeExtraArgs', ''),
     downloadInterface: iface === 'JTAG' ? 'JTAG' : 'SWD',
