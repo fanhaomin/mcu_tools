@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.5] - 2026-10-24
+
+### Changed
+- 面板标题栏精简为 4 个按钮：编译 / 烧录 / 调试 / 刷新。「打开 .ioc」从标题栏移除（入口保留：侧边栏工程分组、资源管理器点开 .ioc、右键菜单、命令面板）。
+
 ## [0.8.4] - 2026-10-24
 
 ### Fixed
