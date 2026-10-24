@@ -103,7 +103,7 @@ function init(context) {
     let cancelSource;
     const refresh = () => {
         sidebar.refresh();
-        status.update(state);
+        status.update(state, settings.buildType);
     };
     const log = (msg) => logger.info(msg);
     // 输出面板自动跟随最新内容：关键节点强制 show（VS Code 只有在视图位于底部时
@@ -1485,6 +1485,25 @@ function init(context) {
     });
     register('autoCmakeFlash.showLogs', () => {
         channel.show(true);
+    });
+    register('autoCmakeFlash.chooseBuildType', async () => {
+        const options = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'];
+        const pick = await vscode.window.showQuickPick(options.map((o) => ({
+            label: o === settings.buildType ? '$(check) ' + o : o,
+            description: o === 'Debug' ? '调试信息完整，调试用（cmake-build-debug）' :
+                o === 'Release' ? '无调试信息，体积最小（cmake-build-release）' :
+                    o === 'RelWithDebInfo' ? '优化 + 调试信息（cmake-build-relwithdebinfo）' :
+                        '最小体积（cmake-build-minsizerel）',
+        })), { title: 'Auto CMake Flash — 选择构建类型', ignoreFocusOut: true });
+        if (!pick || pick.label === '$(check) ' + pick.label) {
+            return;
+        }
+        const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        await cfg.update('buildType', pick.label, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+        settings = (0, settings_1.loadSettings)();
+        log('构建类型已切换为 ' + pick.label + '；构建目录随类型自动切换');
+        refresh();
     });
     register('autoCmakeFlash.toggleEngine', async () => {
         const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');

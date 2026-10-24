@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.6] - 2026-10-24
+
+### Added — 状态栏构建类型选择按钮
+- 状态栏新增构建类型按钮（编译与烧录之间）：显示当前类型（Debug 等），点击弹出 Debug / Release / RelWithDebInfo / MinSizeRel 选择，写入当前工程工作区设置。
+- 切换类型后构建目录自动跟随（cmake-build-debug ↔ cmake-build-release），与 CLion 多类型目录行为一致；刷新即时生效。
+
 ## [0.8.5] - 2026-10-24
 
 ### Changed
