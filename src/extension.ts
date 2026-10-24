@@ -1363,6 +1363,18 @@ function init(context: vscode.ExtensionContext): void {
     getSession: () => engineSession,
     log,
     memento: context.workspaceState,
+    getElf: () => {
+      const p = state.lastBuild?.elfPath;
+      return p && existsSync(p) ? p : undefined;
+    },
+    getNm: () => {
+      const g = state.toolchain?.tools.armGcc;
+      if (!g?.found || !g.path) {
+        return undefined;
+      }
+      const nm = path.join(path.dirname(g.path), process.platform === 'win32' ? 'arm-none-eabi-nm.exe' : 'arm-none-eabi-nm');
+      return existsSync(nm) ? nm : undefined;
+    },
   });
   const mem = new MemViewProvider({
     getSession: () => engineSession,

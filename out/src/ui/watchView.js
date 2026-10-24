@@ -44,6 +44,8 @@ const vscode = __importStar(require("vscode"));
 const dapHelpers_1 = require("../debug/dapHelpers");
 const hexdump_1 = require("../debug/hexdump");
 const dapHelpers_2 = require("../debug/dapHelpers");
+const symbols_1 = require("../debug/symbols");
+const fs = __importStar(require("fs"));
 const STORE_KEY = 'acf.watch.entries';
 const MAX_ENTRIES = 16;
 class WatchViewProvider {
@@ -52,6 +54,34 @@ class WatchViewProvider {
     view;
     visible = false;
     entries = [];
+    symCache;
+    symLoading;
+    /** 加载 ELF 符号表（按 mtime 缓存；nm 失败返回空表不报错） */
+    async ensureSymbols() {
+        const elf = this.deps.getElf();
+        const nm = this.deps.getNm();
+        if (!elf || !nm) {
+            return new Map();
+        }
+        let mtimeMs = 0;
+        try {
+            mtimeMs = fs.statSync(elf).mtimeMs;
+        }
+        catch {
+            return new Map();
+        }
+        if (this.symCache?.elf === elf && this.symCache.mtimeMs === mtimeMs) {
+            return this.symCache.map;
+        }
+        if (!this.symLoading) {
+            this.symLoading = (0, symbols_1.readSymbolTable)(nm, elf).then((map) => {
+                this.symCache = { elf, mtimeMs, map };
+                this.symLoading = undefined;
+            });
+        }
+        await this.symLoading;
+        return this.symCache?.map ?? new Map();
+    }
     constructor(deps) {
         this.deps = deps;
     }
@@ -174,9 +204,33 @@ class WatchViewProvider {
                 results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr };
             }
         }));
-        // 2. 未解析的：尝试 evaluate 解析（probe-rs 运行中不支持 evaluate，
-        //    失败持续 2 秒后自动微停机一次完成解析——只停一次，之后纯旁路）
+        // 2. 未解析的：优先查 ELF 符号表（离线、零停顿、双引擎通用）
         const unresolved = this.entries.filter((e) => e.addr === undefined);
+        if (unresolved.length > 0) {
+            const sym = await this.ensureSymbols();
+            for (const e of unresolved) {
+                const name = e.expr.replace(/^&/, '').trim();
+                const hit = sym.get(name);
+                if (hit) {
+                    e.addr = hit.addr;
+                    e.bytes = Math.max(1, Math.min(256, hit.size));
+                    e.resolveFailed = false;
+                    this.deps.log('变量监控: ' + e.expr + ' @ 0x' + hit.addr.toString(16) + ' (' + e.bytes + 'B，来自 ELF 符号表)');
+                }
+            }
+            const bySym = this.entries.filter((e) => e.addr !== undefined && unresolved.includes(e));
+            await Promise.all(bySym.map(async (e) => {
+                const buf = await (0, dapHelpers_1.readBlock)(s, e.addr, e.bytes);
+                if (buf) {
+                    results[e.expr] = {
+                        hex: (0, dapHelpers_2.toHexLE)(buf, e.bytes * 8),
+                        ok: true,
+                        bytes: e.bytes,
+                        addr: e.addr,
+                    };
+                }
+            }));
+        }
         if (unresolved.length > 0) {
             if (nonIntrusive) {
                 await Promise.all(unresolved.map(async (e) => {

@@ -1106,6 +1106,18 @@ function init(context) {
         getSession: () => engineSession,
         log,
         memento: context.workspaceState,
+        getElf: () => {
+            const p = state.lastBuild?.elfPath;
+            return p && (0, path_1.existsSync)(p) ? p : undefined;
+        },
+        getNm: () => {
+            const g = state.toolchain?.tools.armGcc;
+            if (!g?.found || !g.path) {
+                return undefined;
+            }
+            const nm = path.join(path.dirname(g.path), process.platform === 'win32' ? 'arm-none-eabi-nm.exe' : 'arm-none-eabi-nm');
+            return (0, path_1.existsSync)(nm) ? nm : undefined;
+        },
     });
     const mem = new memView_1.MemViewProvider({
         getSession: () => engineSession,
