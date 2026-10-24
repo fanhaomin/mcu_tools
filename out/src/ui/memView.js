@@ -1,58 +1,23 @@
 "use strict";
 /**
  * 「内存视图」WebviewView：Keil 风格的内存 hexdump 窗口。
- * 添加地址区间（默认 256B），200ms~50ms 实时刷新；字节点击可编辑写回。
- * probe-rs 运行中旁路直读；cortex-debug 自动微停机采样。
+ * 添加地址区间（16-16384B），50-500ms 实时刷新；字节点击可编辑写回。
+ * 渲染为增量式：表格结构只在添加/删除区域时重建，数值刷新只更新
+ * 变化的单元格文本——大区域（16KB≈1.6 万格）也不会卡。
  * 区间持久化在 workspaceState（每个工程独立）。
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemViewProvider = void 0;
-const vscode = __importStar(require("vscode"));
 const dapHelpers_1 = require("../debug/dapHelpers");
-const hexdump_1 = require("../debug/hexdump");
 const STORE_KEY = 'acf.mem.regions';
 const MAX_REGIONS = 8;
+const MAX_BYTES = 16384;
 class MemViewProvider {
     deps;
     static viewType = 'autoCmakeFlash.memview';
     view;
     visible = false;
     regions = [];
-    /** 各区域最近一次读取失败时间（用于 cortex-debug 自动采样判定） */
-    lastFail = new Map();
     constructor(deps) {
         this.deps = deps;
     }
@@ -80,21 +45,39 @@ class MemViewProvider {
                 this.postRegions();
                 break;
             case 'add': {
-                const addr = Number(m.addr);
-                const bytes = Math.min(4096, Math.max(16, Number(m.bytes) || 256));
+                let addr = Number(m.addr);
                 if (!Number.isFinite(addr) || addr <= 0 || addr > 0xffffffff) {
                     return;
                 }
+                let bytes = Number(m.bytes) || 256;
+                let clamped = false;
+                if (bytes > MAX_BYTES) {
+                    bytes = MAX_BYTES;
+                    clamped = true;
+                }
+                bytes = Math.max(16, bytes);
+                addr = Math.floor(addr);
                 if (this.regions.some((r) => r.addr === addr)) {
                     return;
                 }
                 if (this.regions.length >= MAX_REGIONS) {
-                    void vscode.window.showWarningMessage(`内存视图最多 ${MAX_REGIONS} 个区域。`);
+                    void this.view?.webview.postMessage({
+                        cmd: 'toast',
+                        msg: `最多 ${MAX_REGIONS} 个区域`,
+                        err: true,
+                    });
                     return;
                 }
                 this.regions.push({ addr, bytes });
                 await this.persist();
                 this.postRegions();
+                if (clamped) {
+                    void this.view?.webview.postMessage({
+                        cmd: 'toast',
+                        msg: `单区域上限 ${MAX_BYTES} 字节（渲染性能考虑），已自动调整`,
+                        err: true,
+                    });
+                }
                 break;
             }
             case 'remove': {
@@ -131,11 +114,19 @@ class MemViewProvider {
         }
         catch (e) {
             this.deps.log(`内存写入失败 [0x${addr.toString(16)}]: ${e instanceof Error ? e.message : String(e)}`);
-            void vscode.window.showErrorMessage(`内存写入失败（目标运行中？cortex-debug 引擎请先暂停）。[0x${addr.toString(16)}]`);
+            void this.view?.webview.postMessage({
+                cmd: 'toast',
+                msg: `写入失败（目标运行中？cortex-debug 引擎请先暂停）0x${addr.toString(16)}`,
+                err: true,
+            });
         }
     }
     postRegions() {
-        void this.view?.webview.postMessage({ cmd: 'regions', regions: this.regions });
+        void this.view?.webview.postMessage({
+            cmd: 'regions',
+            regions: this.regions,
+            maxBytes: MAX_BYTES,
+        });
     }
     async refresh(intervalMs) {
         const s = this.deps.getSession();
@@ -148,21 +139,20 @@ class MemViewProvider {
         await Promise.all(this.regions.map(async (r) => {
             const buf = await (0, dapHelpers_1.readBlock)(s, r.addr, r.bytes);
             if (buf) {
-                out[r.addr] = { rows: (0, hexdump_1.formatHexDump)(buf, r.addr), ok: true };
+                out[r.addr] = { data: buf.toString('base64'), ok: true };
             }
             else {
                 failed.push(r);
                 out[r.addr] = { ok: false };
-                this.lastFail.set(r.addr, Date.now());
             }
         }));
-        // cortex-debug：读取失败 → 微停机窗口重读（探针瞬断也顺带重试一次）
         if (!nonIntrusive && failed.length > 0) {
+            // cortex-debug：微停机窗口重读
             await (0, dapHelpers_1.sampleWhileRunning)(s, this.deps.log, async () => {
                 await Promise.all(failed.map(async (r) => {
                     const buf = await (0, dapHelpers_1.readBlock)(s, r.addr, r.bytes);
                     if (buf) {
-                        out[r.addr] = { rows: (0, hexdump_1.formatHexDump)(buf, r.addr), ok: true };
+                        out[r.addr] = { data: buf.toString('base64'), ok: true };
                     }
                 }));
             });
@@ -173,7 +163,7 @@ class MemViewProvider {
             await Promise.all(failed.map(async (r) => {
                 const buf = await (0, dapHelpers_1.readBlock)(s, r.addr, r.bytes);
                 if (buf) {
-                    out[r.addr] = { rows: (0, hexdump_1.formatHexDump)(buf, r.addr), ok: true };
+                    out[r.addr] = { data: buf.toString('base64'), ok: true };
                 }
             }));
         }
@@ -192,7 +182,7 @@ class MemViewProvider {
         font-family: var(--vscode-editor-font-family, monospace); }
       input:focus { outline: none; border-color: var(--ac); }
       #addr { flex: 1; min-width: 0; }
-      #len { width: 64px; }
+      #len { width: 70px; }
       button { font-family: inherit; font-size: 12px; padding: 4px 12px; border-radius: 6px;
         cursor: pointer; border: 1px solid transparent;
         background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
@@ -204,11 +194,12 @@ class MemViewProvider {
       .head .n { font-size: 10.5px; color: var(--vscode-descriptionForeground); }
       .head .del { margin-left: auto; cursor: pointer; color: var(--vscode-descriptionForeground); }
       .head .del:hover { color: #f14c4c; }
+      .scroll { max-height: 420px; overflow-y: auto; }
       table { width: 100%; border-collapse: collapse; font-family: var(--vscode-editor-font-family, monospace); }
       td { padding: 2px 4px; white-space: nowrap; }
       tr:hover { background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
       .a { color: var(--vscode-descriptionForeground); font-size: 10.5px; }
-      .by { cursor: pointer; padding: 1px 3px; border-radius: 3px; text-align: center; }
+      .by { cursor: pointer; padding: 1px 3px; border-radius: 3px; text-align: center; min-width: 22px; }
       .by:hover { background: color-mix(in srgb, var(--ac) 25%, transparent); color: var(--ac); }
       .by input { width: 26px; padding: 0 2px; font-family: inherit; font-size: 11px;
         background: var(--vscode-input-background); color: var(--vscode-input-foreground);
@@ -222,10 +213,19 @@ class MemViewProvider {
       select { padding: 3px 6px; border-radius: 5px; font-size: 11px;
         border: 1px solid var(--vscode-input-border, rgba(128,128,128,.35));
         background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); }
+      #toast { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+        padding: 7px 18px; border-radius: 8px; font-size: 12px; opacity: 0;
+        transition: opacity .25s; pointer-events: none;
+        background: color-mix(in srgb, var(--ok) 16%, var(--vscode-sideBar-background));
+        border: 1px solid var(--ok); color: var(--ok); }
+      #toast.show { opacity: 1; }
+      #toast.err { border-color: #f14c4c; color: #f14c4c;
+        background: color-mix(in srgb, #f14c4c 12%, var(--vscode-sideBar-background)); }
+      .stale { opacity: .45; }
     </style></head><body>
       <div class="row">
         <input id="addr" type="text" placeholder="0x20000000（回车添加）">
-        <input id="len" type="text" value="256" title="字节数（16-4096）">
+        <input id="len" type="text" value="256" title="字节数（16-16384）">
         <button id="add">添加</button>
       </div>
       <div id="regions"><div class="empty">添加要查看的内存地址<br>如 0x20000000（SRAM）、0x40010800（GPIOA）</div></div>
@@ -236,68 +236,112 @@ class MemViewProvider {
           <option value="200" selected>200ms</option>
           <option value="500">500ms</option>
         </select>
-        · 点字节格可编辑写回 · 修改过的字节绿色高亮
+        · 点字节格编辑写回 · 修改过的字节绿色高亮 · 单区域上限 16KB
       </div>
+      <div id="toast"></div>
       <script>
         const vscode = acquireVsCodeApi();
-        const state = { regions: [], data: {}, timer: null, interval: 200, changed: {} };
+        const state = { regions: [], data: {}, timer: null, interval: 200, changed: {}, cells: {} };
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         function post(m) { vscode.postMessage(m); }
+        function toast(msg, err) {
+          const t = $('toast');
+          t.textContent = msg;
+          t.className = err ? 'err show' : 'show';
+          clearTimeout(t._h);
+          t._h = setTimeout(() => { t.className = err ? 'err' : ''; }, 2600);
+        }
 
+        // 结构重建：仅在添加/删除区域时执行；单元格元素存入 state.cells 供增量更新
         function render() {
           const wrap = $('regions');
+          state.cells = {};
           if (state.regions.length === 0) {
             wrap.innerHTML = '<div class="empty">添加要查看的内存地址<br>如 0x20000000（SRAM）、0x40010800（GPIOA）</div>';
             return;
           }
           wrap.innerHTML = state.regions.map((r) => {
-            const d = state.data[r.addr];
             let h = '<div class="card" data-k="' + r.addr + '"><div class="head">' +
               '<span class="a">0x' + r.addr.toString(16).toUpperCase() + '</span>' +
-              '<span class="n">' + r.bytes + ' B · ' + (d && d.ok ? '实时' : '读取中…') + '</span>' +
-              '<span class="del" title="移除">✕</span></div>';
-            if (d && d.rows) {
-              h += '<table>' + d.rows.map((row, ri) =>
-                '<tr><td class="a">' + esc(row.addr) + '</td>' +
-                row.bytes.map((b, bi) => {
-                  const abs = r.addr + ri * 16 + bi;
-                  const chg = state.changed[abs];
-                  if (b === '') return '<td></td>';
-                  return '<td class="by' + (chg ? ' chg' : '') + '" data-a="' + abs + '" title="点击编辑并写回">' + esc(chg ? chg.toString(16).toUpperCase().padStart(2, '0') : b) + '</td>';
-                }).join('') +
-                '<td class="asc">' + esc(row.ascii) + '</td></tr>').join('') + '</table>';
+              '<span class="n">' + r.bytes + ' B · 实时</span>' +
+              '<span class="del" title="移除">✕</span></div><div class="scroll"><table>';
+            for (let off = 0; off < r.bytes; off += 16) {
+              h += '<tr><td class="a">0x' + (r.addr + off).toString(16).toUpperCase().padStart(8, '0') + '</td>';
+              for (let i = 0; i < 16 && off + i < r.bytes; i++) {
+                const abs = r.addr + off + i;
+                h += '<td class="by" data-a="' + abs + '">·</td>';
+              }
+              h += '<td class="asc" data-rowa="' + off + '"></td></tr>';
             }
-            h += '</div>';
+            h += '</table></div></div>';
             return h;
           }).join('');
           wrap.querySelectorAll('.card').forEach((card) => {
             const key = +card.getAttribute('data-k');
             card.querySelector('.del').onclick = () => post({ cmd: 'remove', key });
             card.querySelectorAll('.by').forEach((cell) => {
+              state.cells[+cell.getAttribute('data-a')] = cell;
               cell.onclick = () => {
                 if (cell.querySelector('input')) return;
                 const cur = cell.textContent.trim();
-                cell.innerHTML = '<input maxlength="2" value="' + cur + '">';
+                cell.innerHTML = '<input maxlength="2" value="' + esc(cur === '·' ? '' : cur) + '">';
                 const inp = cell.querySelector('input');
                 inp.focus(); inp.select();
-                const commit = () => {
-                  const v = parseInt(inp.value, 16);
-                  const addr = +cell.getAttribute('data-a');
-                  if (Number.isFinite(v)) {
-                    state.changed[addr] = v;
-                    post({ cmd: 'writeByte', byteAddr: addr, byteValue: v });
-                  }
-                  render();
-                };
+                const done = () => render();
                 inp.onkeydown = (ev) => {
-                  if (ev.key === 'Enter') commit();
-                  if (ev.key === 'Escape') render();
+                  if (ev.key === 'Enter') {
+                    const v = parseInt(inp.value, 16);
+                    const addr = +cell.getAttribute('data-a');
+                    if (Number.isFinite(v)) {
+                      state.changed[addr] = v;
+                      post({ cmd: 'writeByte', byteAddr: addr, byteValue: v });
+                    }
+                    done();
+                  }
+                  if (ev.key === 'Escape') done();
                 };
-                inp.onblur = () => render();
+                inp.onblur = () => done();
               };
             });
           });
+          updateCells();
+        }
+
+        // 增量更新：只改文本变化的单元格（16KB ≈ 1.6 万格也在毫秒级）
+        function updateCells() {
+          for (const r of state.regions) {
+            const d = state.data[r.addr];
+            const table = document.querySelector('.card[data-k="' + r.addr + '"] table');
+            if (!table) continue;
+            table.parentElement.classList.toggle('stale', !d || !d.ok);
+            if (!d || !d.ok || !d.data) continue;
+            const buf = Uint8Array.from(atob(d.data), (c) => c.charCodeAt(0));
+            for (let i = 0; i < buf.length; i++) {
+              const abs = r.addr + i;
+              const cell = state.cells[abs];
+              if (!cell) continue;
+              const b = buf[i];
+              const txt = b.toString(16).toUpperCase().padStart(2, '0');
+              const chg = state.changed[abs];
+              const want = chg !== undefined ? chg.toString(16).toUpperCase().padStart(2, '0') : txt;
+              if (cell.textContent !== want) cell.textContent = want;
+              cell.classList.toggle('chg', chg !== undefined);
+            }
+            // ASCII 列
+            const rows = table.querySelectorAll('tr');
+            for (let ri = 0; ri < rows.length; ri++) {
+              const asc = rows[ri].querySelector('.asc');
+              if (!asc) continue;
+              let a = '';
+              for (let i = 0; i < 16; i++) {
+                const b = buf[ri * 16 + i];
+                if (b === undefined) break;
+                a += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '·';
+              }
+              if (asc.textContent !== a) asc.textContent = a;
+            }
+          }
         }
 
         function tick() {
@@ -312,7 +356,9 @@ class MemViewProvider {
             render();
           } else if (m.cmd === 'data') {
             state.data = m.data || {};
-            render();
+            updateCells();
+          } else if (m.cmd === 'toast') {
+            toast(m.msg, m.err);
           }
         });
 
