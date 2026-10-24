@@ -1550,16 +1550,18 @@ function init(context) {
         const ms = parseInt(pick.label.replace(/[^0-9]/g, ''), 10);
         await (0, workspaceSettings_1.updateWorkspaceSetting)('debugRefreshMs', ms);
         settings = (0, settings_1.loadSettings)();
-        periph.setIntervalMs(settings.debugRefreshMs);
-        watch.setIntervalMs(settings.debugRefreshMs);
-        mem.setIntervalMs(settings.debugRefreshMs);
-        log('调试面板刷新间隔: ' + settings.debugRefreshMs + 'ms');
+        settings.debugRefreshMs = ms; // 直写文件后 Configuration 读取有延迟，先用刚写的值
+        periph.setIntervalMs(ms);
+        watch.setIntervalMs(ms);
+        mem.setIntervalMs(ms);
+        log('调试面板刷新间隔: ' + ms + 'ms');
     });
     register('autoCmakeFlash.toggleEngine', async () => {
         const cur = vscode.workspace.getConfiguration('autoCmakeFlash').get('debugEngine', 'cortex-debug');
         const next = cur === 'probe-rs' ? 'cortex-debug' : 'probe-rs';
         await (0, workspaceSettings_1.updateWorkspaceSetting)('debugEngine', next);
         settings = (0, settings_1.loadSettings)();
+        settings.debugEngine = next; // 直写文件后 Configuration 读取有延迟
         void vscode.window.showInformationMessage(`Auto CMake Flash: 调试引擎已切换为 ${next === 'probe-rs' ? 'probe-rs（旁路直读，零停机）' : 'cortex-debug（停机式）'}。下次调试生效。`);
         refresh();
     });

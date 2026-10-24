@@ -359,15 +359,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         <button id="add">添加</button>
       </div>
       <div id="list"><div class="empty">添加要实时监控的变量<br>如 uwTick、(int)3.14 式表达式、&结构体字段</div></div>
-      <div class="row2">刷新
-        <select id="iv">
-          <option value="50">50ms</option>
-          <option value="100">100ms</option>
-          <option value="200" selected>200ms</option>
-          <option value="500">500ms</option>
-        </select>
-        · probe-rs 引擎运行中旁路直读 · cortex-debug 自动微停机采样
-      </div>
+      <div class="row2">probe-rs 引擎运行中旁路直读 · cortex-debug 自动微停机采样 · 刷新间隔在侧边栏「调试」分组设置</div>
       <script>
         const vscode = acquireVsCodeApi();
         const state = { entries: [], vals: {}, timer: null, interval: 200 };
