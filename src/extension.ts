@@ -1368,9 +1368,18 @@ function init(context: vscode.ExtensionContext): void {
     getSession: () => engineSession,
     log,
     memento: context.workspaceState,
-    getElf: () => {
+    getElf: async () => {
       const p = state.lastBuild?.elfPath;
-      return p && existsSync(p) ? p : undefined;
+      if (p && existsSync(p)) {
+        return p;
+      }
+      // 兜底：上次构建记录缺失/指向旧目录时，扫描构建目录取最新的 ELF
+      const root = state.root;
+      if (!root) {
+        return undefined;
+      }
+      const elfs = (await findArtifacts(buildDirOf(root))).filter((a) => a.format === 'elf');
+      return elfs[0]?.path;
     },
     getNm: () => {
       const g = state.toolchain?.tools.armGcc;

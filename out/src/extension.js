@@ -1111,9 +1111,18 @@ function init(context) {
         getSession: () => engineSession,
         log,
         memento: context.workspaceState,
-        getElf: () => {
+        getElf: async () => {
             const p = state.lastBuild?.elfPath;
-            return p && (0, path_1.existsSync)(p) ? p : undefined;
+            if (p && (0, path_1.existsSync)(p)) {
+                return p;
+            }
+            // 兜底：上次构建记录缺失/指向旧目录时，扫描构建目录取最新的 ELF
+            const root = state.root;
+            if (!root) {
+                return undefined;
+            }
+            const elfs = (await (0, artifacts_1.findArtifacts)(buildDirOf(root))).filter((a) => a.format === 'elf');
+            return elfs[0]?.path;
         },
         getNm: () => {
             const g = state.toolchain?.tools.armGcc;

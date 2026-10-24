@@ -17,7 +17,7 @@ export interface WatchDeps {
   log(msg: string): void;
   memento: vscode.Memento;
   /** 最近一次构建的 ELF（符号表来源），无则 undefined */
-  getElf(): string | undefined;
+  getElf(): Promise<string | undefined>;
   /** arm-none-eabi-nm 路径（与 ARM GCC 同目录），无则 undefined */
   getNm(): string | undefined;
   /** 调试面板统一刷新间隔 ms */
@@ -51,7 +51,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
 
   /** 加载 ELF 符号表（按 mtime 缓存；nm 失败返回空表不报错） */
   private async ensureSymbols(): Promise<Map<string, SymbolInfo>> {
-    const elf = this.deps.getElf();
+    const elf = await this.deps.getElf();
     const nm = this.deps.getNm();
     if (!elf || !nm) {
       return new Map();
@@ -66,8 +66,16 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
       return this.symCache.map;
     }
     if (!this.symLoading) {
+      const isNew = !this.symCache || this.symCache.elf !== elf || this.symCache.mtimeMs !== mtimeMs;
       this.symLoading = readSymbolTable(nm, elf).then((map) => {
         this.symCache = { elf, mtimeMs, map };
+        if (isNew && map.size > 0) {
+          // 新 ELF 可用：清除此前的解析失败标记，允许重试
+          for (const e of this.entries) {
+            e.resolveFailed = false;
+            e.resolveTries = 0;
+          }
+        }
         this.symLoading = undefined;
       });
     }
@@ -217,6 +225,13 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
     const unresolved = this.entries.filter((e) => e.addr === undefined);
     if (unresolved.length > 0) {
       const sym = await this.ensureSymbols();
+      if (sym.size === 0) {
+        const now = Date.now();
+        if (!this.lastEmptySymLog || now - this.lastEmptySymLog > 10_000) {
+          this.lastEmptySymLog = now;
+          this.deps.log('变量监控: 无法离线解析（缺 ELF 构建产物或 nm 工具）——请先编译一次；也可直接监控 0x 地址');
+        }
+      }
       for (const e of unresolved) {
         const name = e.expr.replace(/^&/, '').trim();
         const hit = sym.get(name);
@@ -318,6 +333,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
 
   private readFailedRecently = false;
   private lastProbeSample = 0;
+  private lastEmptySymLog = 0;
 
   private html(): string {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
