@@ -443,7 +443,7 @@ class PeriphViewProvider {
       <script>
         const vscode = acquireVsCodeApi();
         const state = { svd: false, periphs: [], active: null, regs: [], sel: null,
-                        vals: {}, q: '', engine: undefined, session: false, monitor: false };
+                        vals: {}, q: '', engine: undefined, session: false, monitor: false, frowFields: [] };
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         function post(m) { vscode.postMessage(m); }
@@ -566,9 +566,12 @@ class PeriphViewProvider {
               post({ cmd: 'write', addr: r.address, size: r.size, value: nv });
             };
           });
+          const meaningful = fields.filter(f => f.bitWidth > 1 || (f.enumerated && f.enumerated.length > 0));
+          state.frowFields = meaningful;
           const fr = $('frows'); if (!fr) return;
+          if (meaningful.length === 0) { fr.innerHTML = ''; return; } // 全是单bit无枚举的琐碎字段（如 ODR/BSRR）：点阵已足够，不重复展示
           let h2 = '';
-          fields.forEach((f, i) => {
+          meaningful.forEach((f, i) => {
             h2 += '<div class="frow" data-i="' + i + '"><span class="frange">[' + (f.bitOffset + f.bitWidth - 1) + ':' + f.bitOffset + ']</span>' +
               '<span class="fname2">' + esc(f.name) + '</span><span class="fenum" id="fe' + i + '"></span>' +
               '<input class="fin" data-i="' + i + '" title="回车写入位域"></div>';
@@ -578,7 +581,7 @@ class PeriphViewProvider {
             inp.addEventListener('keydown', (ev) => {
               if (ev.key !== 'Enter') return;
               const i = +inp.getAttribute('data-i');
-              const f = (curReg().fields || [])[i]; if (!f) return;
+              const f = (state.frowFields || [])[i]; if (!f) return;
               const v = state.vals[state.active + '.' + state.sel];
               const cur = v && v.ok ? parseInt(v.hex, 16) : 0;
               const fv = (parseInt(inp.value, 16) || 0) & ((1 << f.bitWidth) - 1);
@@ -608,7 +611,7 @@ class PeriphViewProvider {
             el.classList.toggle('on', on);
             el.querySelector('.v').textContent = num !== null ? (on ? '1' : '0') : '·';
           });
-          (r.fields || []).forEach((f, i) => {
+          (state.frowFields || []).forEach((f, i) => {
             const fe = $('fe' + i); if (!fe) return;
             const fvEl = $('fin[data-i="' + i + '"]');
             if (num === null) { if (fe) fe.textContent = ''; return; }

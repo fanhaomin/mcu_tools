@@ -12,6 +12,11 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - probe-rs 0.32 不接受 `probe: "auto"`（选择器必须是 VID:PID 格式，否则报 Serialization error）：省略该字段即为自动选择第一个探针；需要指定探针时在设置中提供 VID:PID。
 
+## [0.7.3] - 2026-10-24
+
+### Changed — 琐碎位域明细自动隐藏
+- ODR/IDR/BSRR 这类“一脚一位、无枚举”的寄存器不再显示重复的位域明细行（信息已在 LED 板与位点阵中）；仅当寄存器含多位字段或枚举语义（如 USART_CR1、ADC_SMPR）时显示明细与输入框。
+
 ## [0.7.2] - 2026-10-24
 
 ### Changed — 只写寄存器的点阵位直接控制
