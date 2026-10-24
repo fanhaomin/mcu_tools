@@ -185,6 +185,8 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
         border: 1px solid var(--ac); border-radius: 3px; text-align: center; }
       .asc { color: var(--vscode-descriptionForeground); padding-left: 8px; }
       .chg { color: var(--ok); font-weight: 700; }
+      .diff { color: #e2b93d; font-weight: 700;
+        background: color-mix(in srgb, #e2b93d 14%, transparent); }
       .stale { opacity: .45; }
       .hint { font-size: 10.5px; color: var(--vscode-descriptionForeground); }
       .row2 { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px;
@@ -222,7 +224,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
       <script>
         const vscode = acquireVsCodeApi();
         const VIEW = 256;
-        const state = { base: 0x20000000, data: null, ok: false, timer: null, interval: 200, changed: {}, history: [] };
+        const state = { base: 0x20000000, data: null, ok: false, timer: null, interval: 200, changed: {}, history: [], prev: null, prevBase: 0 };
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         function post(m) { vscode.postMessage(m); }
@@ -298,14 +300,19 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
               const txt = b.toString(16).toUpperCase().padStart(2, '0');
               const abs = state.base + i;
               const chg = state.changed[abs];
+              const diff = state.prev && state.prevBase === state.base &&
+                state.prev[i] !== undefined && state.prev[i] !== b;
               const want = chg !== undefined ? chg.toString(16).toUpperCase().padStart(2, '0') : txt;
               if (cell.textContent !== want) cell.textContent = want;
               cell.classList.toggle('chg', chg !== undefined);
+              cell.classList.toggle('diff', diff && chg === undefined);
               ascii += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '·';
             });
             const asc = tr.querySelector('.asc');
             if (asc.textContent !== ascii) asc.textContent = ascii;
           }
+          state.prev = buf;
+          state.prevBase = state.base;
         }
 
         function renderHist() {
@@ -318,6 +325,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
           if (base === state.base) return;
           state.base = base;
           state.changed = {};
+          state.prev = null;
           build();
           tick();
         }

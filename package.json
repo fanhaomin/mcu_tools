@@ -2,7 +2,7 @@
   "name": "auto-cmake-flash",
   "displayName": "Auto CMake Flash (STM32)",
   "description": "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录与校验一体化工具（第一版仅支持 STM32）",
-  "version": "0.9.10",
+  "version": "0.9.11",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
