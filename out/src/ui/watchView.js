@@ -311,7 +311,7 @@ class WatchViewProvider {
             const hex = v.ok ? v.hex : (v.hex || '…');
             return '<div class="item" data-e="' + esc(e.expr) + '">' +
               '<div><div class="name">' + esc(e.expr) + '</div>' +
-              '<div class="meta">' + (e.addr !== undefined ? '0x' + e.addr.toString(16).toUpperCase() : '解析中…') + ' · ' + e.bytes + 'B</div></div>' +
+              '<div class="meta">' + (e.addr !== undefined ? '0x' + e.addr.toString(16).toUpperCase() + ' · ' + e.bytes + 'B' : (e.resolveFailed ? '无法解析 — 请改用 0x 地址' : '解析中…')) + '</div>' +
               '<span class="val' + (v.ok ? '' : ' stale') + '">' + esc(hex) + '</span>' +
               '<span class="del" title="移除">✕</span></div>';
           }).join('');
