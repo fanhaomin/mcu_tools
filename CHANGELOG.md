@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.8] - 2026-10-24
+
+### Fixed
+- 修复移除顶部工具条时误删了两栏布局容器（#main）的开标签，导致面板塌成单列竖排：已恢复，左 1/4 寄存器列表 + 右侧详情的横向布局回来。
+
 ## [0.8.7] - 2026-10-24
 
 ### Changed — 外设面板移除顶部工具条

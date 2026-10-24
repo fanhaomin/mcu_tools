@@ -429,6 +429,7 @@ class PeriphViewProvider {
       .empty { padding: 30px 12px; text-align: center; color: var(--vscode-descriptionForeground); line-height: 1.7; }
     </style></head><body>
 
+      <div id="main">
         <div class="pane" id="left"></div>
         <div class="pane" id="right"></div>
       </div>
