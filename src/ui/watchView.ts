@@ -10,6 +10,7 @@ import { isEngineSession, readBlock, sampleWhileRunning } from '../debug/dapHelp
 import { parseEvalHexAddress, parseEvalInt } from '../debug/hexdump';
 import { toHexLE } from '../debug/dapHelpers';
 import { readSymbolTable, SymbolInfo } from '../debug/symbols';
+import { splitTypeSuffix, decodeTyped, kindByBytes, ValueKind } from '../debug/typed';
 import { captureTopFrameVariables } from '../debug/stoppedCapture';
 import * as fs from 'fs';
 
@@ -39,6 +40,12 @@ interface WatchEntry {
   resolveFailed?: boolean;
   /** 断点捕获的 DAP memoryReference（局部变量经此监控） */
   memRef?: string;
+  /** 用户指定/推断的解码类型 */
+  kind: ValueKind;
+  /** 类型显示名 */
+  typeLabel: string;
+  /** 用户是否显式指定了类型 */
+  explicitType?: boolean;
 }
 
 const STORE_KEY = 'acf.watch.entries';
@@ -167,10 +174,27 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
           void vscode.window.showWarningMessage(`变量监控最多 ${MAX_ENTRIES} 个条目。`);
           return;
         }
-        const addrMatch = /^0x[0-9a-fA-F]{1,8}$/.exec(expr);
-        this.entries.push(addrMatch
-          ? { expr, addr: parseInt(expr, 16), bytes: 4 }
-          : { expr, bytes: 4 });
+        const { name, spec } = splitTypeSuffix(expr);
+        const addrMatch = /^0x[0-9a-fA-F]{1,8}$/.exec(name);
+        if (addrMatch) {
+          const spec2 = spec ?? { kind: 'u32' as ValueKind, bytes: 4, label: 'uint32_t' };
+          this.entries.push({
+            expr,
+            addr: parseInt(name, 16),
+            bytes: spec2.bytes,
+            kind: spec2.kind,
+            typeLabel: spec2.label,
+            explicitType: !!spec,
+          });
+        } else {
+          this.entries.push({
+            expr: name,
+            bytes: spec?.bytes ?? 4,
+            kind: spec?.kind ?? 'u32',
+            typeLabel: spec?.label ?? 'uint32_t',
+            explicitType: !!spec,
+          });
+        }
         await this.persist();
         this.postEntries();
         break;
@@ -236,7 +260,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const nonIntrusive = s.type === 'probe-rs-debug';
-    const results: Record<string, { hex: string; ok: boolean; bytes: number; addr: number }> = {};
+    const results: Record<string, { hex: string; ok: boolean; bytes: number; addr: number; value: string }> = {};
     const failed: WatchEntry[] = [];
 
     // 1. 已解析地址的：旁路读取
@@ -254,6 +278,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         if (buf.length > 0) {
           results[e.expr] = {
             hex: toHexLE(buf, e.bytes * 8),
+            value: decodeTyped(buf, e.kind),
             ok: true,
             bytes: e.bytes,
             addr: e.addr ?? 0,
@@ -264,7 +289,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         // 目标运行中不可读（cortex-debug）
       }
       failed.push(e);
-      results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr ?? 0 };
+      results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr ?? 0, value: '' };
     };
     await Promise.all(
       this.entries.filter((e) => e.addr !== undefined || e.memRef).map((e) => readOne(e)),
@@ -286,7 +311,10 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         const hit = sym.get(name);
         if (hit) {
           e.addr = hit.addr;
-          e.bytes = Math.max(1, Math.min(256, hit.size));
+          if (!e.explicitType) {
+            e.bytes = Math.max(1, Math.min(256, hit.size));
+            e.kind = kindByBytes(e.bytes);
+          }
           e.resolveFailed = false;
           this.deps.log('变量监控: ' + e.expr + ' @ 0x' + hit.addr.toString(16) + ' (' + e.bytes + 'B，来自 ELF 符号表)');
         }
@@ -298,6 +326,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
           if (buf) {
             results[e.expr] = {
               hex: toHexLE(buf, e.bytes * 8),
+              value: decodeTyped(buf, e.kind),
               ok: true,
               bytes: e.bytes,
               addr: e.addr!,
@@ -316,6 +345,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
               if (buf) {
                 results[e.expr] = {
                   hex: toHexLE(buf, e.bytes * 8),
+                  value: decodeTyped(buf, e.kind),
                   ok: true,
                   bytes: e.bytes,
                   addr: e.addr,
@@ -339,6 +369,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
                 if (buf) {
                   results[e.expr] = {
                     hex: toHexLE(buf, e.bytes * 8),
+                    value: decodeTyped(buf, e.kind),
                     ok: true,
                     bytes: e.bytes,
                     addr: e.addr,
@@ -380,6 +411,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
             if (buf) {
               results[e.expr] = {
                 hex: toHexLE(buf, e.bytes * 8),
+                value: decodeTyped(buf, e.kind),
                 ok: true,
                 bytes: e.bytes,
                 addr: e.addr ?? 0,
@@ -413,9 +445,16 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
       button.ghost { background: var(--vscode-button-secondaryBackground);
         color: var(--vscode-button-secondaryForeground); }
-      .item { display: flex; align-items: center; gap: 8px; padding: 5px 9px;
+      .item { display: grid; grid-template-columns: minmax(90px, 1.4fr) 64px 84px minmax(80px, 1fr) 18px;
+        gap: 6px; align-items: center; padding: 5px 9px;
         border: 1px solid rgba(128,128,128,.22); border-radius: 8px; margin-bottom: 4px;
         background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent); }
+      .whead { display: grid; grid-template-columns: minmax(90px, 1.4fr) 64px 84px minmax(80px, 1fr) 18px;
+        gap: 6px; padding: 3px 9px; font-size: 10.5px; color: var(--vscode-descriptionForeground);
+        border-bottom: 1px solid rgba(128,128,128,.25); }
+      .ty { font-size: 11px; color: var(--vscode-descriptionForeground); }
+      .ad { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px;
+        color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; }
       .name { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .val { margin-left: auto; font-family: var(--vscode-editor-font-family, monospace);
@@ -451,13 +490,19 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
             list.innerHTML = '<div class="empty">添加要实时监控的变量<br>变量名（如 led_toggle_count）· 表达式（&arr[2]）· 0x20000000<br>提示：CMSIS 宏（如 SCB->VTOR）需工程带宏调试信息（-g3），否则请直接用其地址</div>';
             return;
           }
-          list.innerHTML = state.entries.map((e) => {
+          const header = '<div class="whead"><span>变量名</span><span>类型</span><span>值</span><span>地址</span><span></span></div>';
+          list.innerHTML = header + state.entries.map((e) => {
             const v = state.vals[e.expr] || {};
             const hex = v.ok ? v.hex : (v.hex || '…');
+            const valShown = v.ok && v.value ? v.value : esc(hex);
+            const addrShown = e.addr !== undefined
+              ? '0x' + e.addr.toString(16).toUpperCase()
+              : (e.memRef ? '已捕获' : (e.resolveFailed ? '无法解析' : '解析中…'));
             return '<div class="item" data-e="' + esc(e.expr) + '">' +
-              '<div><div class="name">' + esc(e.expr) + '</div>' +
-              '<div class="meta">' + (e.addr !== undefined ? '0x' + e.addr.toString(16).toUpperCase() + ' · ' + e.bytes + 'B' : e.memRef ? '已捕获 · ' + e.bytes + 'B' : (e.resolveFailed ? '无法解析 — 请改用 0x 地址' : '解析中… · ' + e.bytes + 'B')) + '</div>' +
-              '<span class="val' + (v.ok ? '' : ' stale') + '">' + esc(hex) + '</span>' +
+              '<div class="name" title="' + esc(e.expr) + '">' + esc(e.expr) + '</div>' +
+              '<div class="ty">' + esc(e.typeLabel) + '</div>' +
+              '<div class="val' + (v.ok ? '' : ' stale') + '">' + valShown + '</div>' +
+              '<div class="ad" title="' + esc(addrShown) + '">' + esc(addrShown) + '</div>' +
               '<span class="del" title="移除">✕</span></div>';
           }).join('');
           list.querySelectorAll('.item').forEach((el) => {
