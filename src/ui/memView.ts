@@ -211,15 +211,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
         <div class="head"><span class="a" id="base">—</span><span class="n">256 B · 实时</span></div>
         <table id="tbl"></table>
       </div>
-      <div class="row2">刷新
-        <select id="iv">
-          <option value="50">50ms</option>
-          <option value="100">100ms</option>
-          <option value="200" selected>200ms</option>
-          <option value="500">500ms</option>
-        </select>
-        · 回车跳转 · 滚轮逐行 / Shift+滚轮整页 · 点字节格编辑写回
-      </div>
+      <div class="row2">回车跳转 · 滚轮逐行 / Shift+滚轮整页 · 点字节格编辑写回 · <span style="color:#e2b93d">琥珀</span>=程序修改 <span style="color:var(--ok)">绿</span>=手动修改 · 刷新间隔在侧边栏「调试」分组设置</div>
       <div id="toast"></div>
       <script>
         const vscode = acquireVsCodeApi();
