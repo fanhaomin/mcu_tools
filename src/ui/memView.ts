@@ -167,7 +167,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
         border-bottom: 1px solid rgba(128,128,128,.18); }
       .head .a { font-family: var(--vscode-editor-font-family, monospace); font-weight: 700; color: var(--ac); }
       .head .n { font-size: 10.5px; color: var(--vscode-descriptionForeground); }
-      table { width: 100%; border-collapse: collapse; font-family: var(--vscode-editor-font-family, monospace); }
+      table { border-collapse: collapse; font-family: var(--vscode-editor-font-family, monospace); }
       td { padding: 2px 4px; white-space: nowrap; }
       tr:hover { background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
       .a { color: var(--vscode-descriptionForeground); font-size: 10.5px; user-select: none; cursor: grab; }
