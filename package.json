@@ -1,8 +1,8 @@
 {
   "name": "auto-cmake-flash",
   "displayName": "Auto CMake Flash (STM32)",
-  "description": "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录与校验一体化工具（第一版仅支持 STM32）",
-  "version": "0.9.17",
+  "description": "STM32 \u5de5\u7a0b\u81ea\u52a8\u8bc6\u522b\u3001CMake \u914d\u7f6e\u7f16\u8bd1\u3001ST-LINK \u70e7\u5f55\u4e0e\u6821\u9a8c\u4e00\u4f53\u5316\u5de5\u5177\uff08\u7b2c\u4e00\u7248\u4ec5\u652f\u6301 STM32\uff09",
+  "version": "0.9.18",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
@@ -39,23 +39,23 @@
       "auto-cmake-flash": [
         {
           "id": "autoCmakeFlash.project",
-          "name": "工程与环境"
+          "name": "\u5de5\u7a0b\u4e0e\u73af\u5883"
         }
       ],
       "auto-cmake-flash-debug": [
         {
           "id": "autoCmakeFlash.periph",
-          "name": "外设寄存器",
+          "name": "\u5916\u8bbe\u5bc4\u5b58\u5668",
           "type": "webview"
         },
         {
           "id": "autoCmakeFlash.watch",
-          "name": "变量监控",
+          "name": "\u53d8\u91cf\u76d1\u63a7",
           "type": "webview"
         },
         {
           "id": "autoCmakeFlash.memview",
-          "name": "内存视图",
+          "name": "\u5185\u5b58\u89c6\u56fe",
           "type": "webview"
         }
       ]
@@ -75,97 +75,97 @@
     "commands": [
       {
         "command": "autoCmakeFlash.chooseProject",
-        "title": "Auto CMake Flash: 选择要编译/烧录的工程",
+        "title": "Auto CMake Flash: \u9009\u62e9\u8981\u7f16\u8bd1/\u70e7\u5f55\u7684\u5de5\u7a0b",
         "icon": "$(folder)"
       },
       {
         "command": "autoCmakeFlash.scanProject",
-        "title": "Auto CMake Flash: 扫描工程与环境",
+        "title": "Auto CMake Flash: \u626b\u63cf\u5de5\u7a0b\u4e0e\u73af\u5883",
         "icon": "$(refresh)"
       },
       {
         "command": "autoCmakeFlash.detectEnvironment",
-        "title": "Auto CMake Flash: 检测开发环境",
+        "title": "Auto CMake Flash: \u68c0\u6d4b\u5f00\u53d1\u73af\u5883",
         "icon": "$(tools)"
       },
       {
         "command": "autoCmakeFlash.detectStLink",
-        "title": "Auto CMake Flash: 检测 ST-LINK 连接",
+        "title": "Auto CMake Flash: \u68c0\u6d4b ST-LINK \u8fde\u63a5",
         "icon": "$(plug)"
       },
       {
         "command": "autoCmakeFlash.configureCMake",
-        "title": "Auto CMake Flash: 配置 CMake",
+        "title": "Auto CMake Flash: \u914d\u7f6e CMake",
         "icon": "$(settings-gear)"
       },
       {
         "command": "autoCmakeFlash.build",
-        "title": "Auto CMake Flash: 编译工程",
+        "title": "Auto CMake Flash: \u7f16\u8bd1\u5de5\u7a0b",
         "icon": "$(zap)"
       },
       {
         "command": "autoCmakeFlash.rebuild",
-        "title": "Auto CMake Flash: 重新配置并编译",
+        "title": "Auto CMake Flash: \u91cd\u65b0\u914d\u7f6e\u5e76\u7f16\u8bd1",
         "icon": "$(debug-restart)"
       },
       {
         "command": "autoCmakeFlash.buildAndFlash",
-        "title": "Auto CMake Flash: 编译并烧录",
+        "title": "Auto CMake Flash: \u7f16\u8bd1\u5e76\u70e7\u5f55",
         "icon": "$(rocket)"
       },
       {
         "command": "autoCmakeFlash.debug",
-        "title": "Auto CMake Flash: 编译并调试",
+        "title": "Auto CMake Flash: \u7f16\u8bd1\u5e76\u8c03\u8bd5",
         "icon": "$(debug-alt)"
       },
       {
         "command": "autoCmakeFlash.debugAttach",
-        "title": "Auto CMake Flash: 附加调试运行中的目标",
+        "title": "Auto CMake Flash: \u9644\u52a0\u8c03\u8bd5\u8fd0\u884c\u4e2d\u7684\u76ee\u6807",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "autoCmakeFlash.openIoc",
-        "title": "Auto CMake Flash: 在 STM32CubeMX 中打开 .ioc",
+        "title": "Auto CMake Flash: \u5728 STM32CubeMX \u4e2d\u6253\u5f00 .ioc",
         "icon": "$(file-text)"
       },
       {
         "command": "autoCmakeFlash.flashExisting",
-        "title": "Auto CMake Flash: 烧录现有固件",
+        "title": "Auto CMake Flash: \u70e7\u5f55\u73b0\u6709\u56fa\u4ef6",
         "icon": "$(rocket)"
       },
       {
         "command": "autoCmakeFlash.clean",
-        "title": "Auto CMake Flash: 清理插件构建目录",
+        "title": "Auto CMake Flash: \u6e05\u7406\u63d2\u4ef6\u6784\u5efa\u76ee\u5f55",
         "icon": "$(trash)"
       },
       {
         "command": "autoCmakeFlash.openBuildDir",
-        "title": "Auto CMake Flash: 打开构建目录",
+        "title": "Auto CMake Flash: \u6253\u5f00\u6784\u5efa\u76ee\u5f55",
         "icon": "$(folder-opened)"
       },
       {
         "command": "autoCmakeFlash.showArtifacts",
-        "title": "Auto CMake Flash: 显示构建产物信息",
+        "title": "Auto CMake Flash: \u663e\u793a\u6784\u5efa\u4ea7\u7269\u4fe1\u606f",
         "icon": "$(file-binary)"
       },
       {
         "command": "autoCmakeFlash.revealElf",
-        "title": "Auto CMake Flash: 定位 ELF 文件",
+        "title": "Auto CMake Flash: \u5b9a\u4f4d ELF \u6587\u4ef6",
         "icon": "$(search)"
       },
       {
         "command": "autoCmakeFlash.chooseMcu",
-        "title": "Auto CMake Flash: 手动选择芯片型号",
+        "title": "Auto CMake Flash: \u624b\u52a8\u9009\u62e9\u82af\u7247\u578b\u53f7",
         "icon": "$(chip)"
       },
       {
         "command": "autoCmakeFlash.showLogs",
-        "title": "Auto CMake Flash: 查看日志",
+        "title": "Auto CMake Flash: \u67e5\u770b\u65e5\u5fd7",
         "icon": "$(output)"
       },
       {
         "command": "autoCmakeFlash.openSettings",
-        "title": "Auto CMake Flash: 打开设置",
+        "title": "Auto CMake Flash: \u6253\u5f00\u8bbe\u7f6e",
         "icon": "$(gear)"
       }
     ],
@@ -269,7 +269,7 @@
     "panels": {
       "acf-debug": {
         "id": "auto-cmake-flash-debug",
-        "title": "ACF 调试",
+        "title": "ACF \u8c03\u8bd5",
         "icon": "resources/auto-cmake-flash.svg"
       }
     }
