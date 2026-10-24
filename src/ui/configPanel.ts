@@ -5,6 +5,7 @@
  */
 
 import * as vscode from 'vscode';
+import { updateWorkspaceSetting } from '../config/workspaceSettings';
 
 interface FieldDef {
   key: string;
@@ -119,11 +120,8 @@ export class ConfigPanel {
     if (m.cmd !== 'save') {
       return;
     }
-    const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
     const defs = this.fieldDefs().flatMap((g) => g.fields);
     const cur = loadSettingsSafe();
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    const target = folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global;
     let changed = 0;
     for (const def of defs) {
       const nv = m.values?.[def.key];
@@ -146,7 +144,7 @@ export class ConfigPanel {
         continue;
       }
       try {
-        await cfg.update(def.key, value, target);
+        await updateWorkspaceSetting(def.key, value);
         changed++;
         this.log(`配置已更新: ${def.key} = ${value === undefined ? '(默认)' : String(value)}`);
       } catch (e) {

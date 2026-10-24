@@ -40,6 +40,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConfigPanel = void 0;
 const vscode = __importStar(require("vscode"));
+const workspaceSettings_1 = require("../config/workspaceSettings");
 class ConfigPanel {
     log;
     panel;
@@ -132,11 +133,8 @@ class ConfigPanel {
         if (m.cmd !== 'save') {
             return;
         }
-        const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
         const defs = this.fieldDefs().flatMap((g) => g.fields);
         const cur = loadSettingsSafe();
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        const target = folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global;
         let changed = 0;
         for (const def of defs) {
             const nv = m.values?.[def.key];
@@ -160,7 +158,7 @@ class ConfigPanel {
                 continue;
             }
             try {
-                await cfg.update(def.key, value, target);
+                await (0, workspaceSettings_1.updateWorkspaceSetting)(def.key, value);
                 changed++;
                 this.log(`配置已更新: ${def.key} = ${value === undefined ? '(默认)' : String(value)}`);
             }
