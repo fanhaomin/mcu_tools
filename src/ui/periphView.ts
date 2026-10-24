@@ -28,6 +28,8 @@ export interface PeriphViewDeps {
   /** 当前可用的调试会话（cortex-debug），无则 undefined */
   getSession(): vscode.DebugSession | undefined;
   log(msg: string): void;
+  /** 调试面板统一刷新间隔 ms */
+  getInterval(): number;
 }
 
 export class PeriphViewProvider implements vscode.WebviewViewProvider {
@@ -36,6 +38,11 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
   private regCache = new Map<string, SvdPeripheral>();
 
   constructor(private readonly deps: PeriphViewDeps) {}
+
+  /** 推送统一刷新间隔（设置变更时调用） */
+  setIntervalMs(ms: number): void {
+    void this.view?.webview.postMessage({ cmd: 'interval', ms });
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -685,6 +692,8 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
         });
 
         state.timer = setInterval(tick, 200);
+
+        window.addEventListener('message', (e0) => { if (e0.data.cmd === 'interval') { if (state.timer) clearInterval(state.timer); state.timer = setInterval(tick, e0.data.ms); } });
 
         post({ cmd: 'ready' });
       </script>

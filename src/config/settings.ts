@@ -19,8 +19,10 @@ export interface AutoCmakeFlashSettings {
   gdbServerPath: string;
   /** STM32CubeMX.exe 完整路径（打开 .ioc 用，留空自动检测） */
   cubemxPath: string;
-  /** 调试引擎：cortex-debug（ST-LINK GDB Server）或 probe-rs（直连 DAP，支持运行中读寄存器） */
+  /** 调试引擎：cortex-debug（停机式）或 probe-rs（旁路直读） */
   debugEngine: 'cortex-debug' | 'probe-rs';
+  /** 调试面板（外设/变量/内存）统一刷新间隔 ms（50-5000） */
+  debugRefreshMs: number;
   /** probe-rs 芯片名覆盖（如 STM32F103C8；留空按识别的型号自动推导） */
   probeRsChip: string;
   /** SVD 文件路径（调试时显示外设寄存器视图，可选） */
@@ -64,6 +66,7 @@ export function loadSettings(): AutoCmakeFlashSettings {
     cubemxPath: cfg.get<string>('cubemxPath', ''),
     debugEngine:
       cfg.get<string>('debugEngine', 'cortex-debug') === 'probe-rs' ? 'probe-rs' : 'cortex-debug',
+    debugRefreshMs: clampNumber(cfg.get<number>('debugRefreshMs', 200), 50, 5000, 200),
     probeRsChip: cfg.get<string>('probeRsChip', ''),
     svdFile: cfg.get<string>('svdFile', ''),
     cmakeToolchainFile: cfg.get<string>('cmakeToolchainFile', ''),

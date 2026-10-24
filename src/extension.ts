@@ -138,6 +138,9 @@ function init(context: vscode.ExtensionContext): void {
     onSettingsChange(() => {
       settings = loadSettings();
       logger.info('设置已更新。');
+      periph.setIntervalMs(settings.debugRefreshMs);
+      watch.setIntervalMs(settings.debugRefreshMs);
+      mem.setIntervalMs(settings.debugRefreshMs);
       refresh();
     }),
   );
@@ -1351,6 +1354,7 @@ function init(context: vscode.ExtensionContext): void {
     getSvdStatus: () => periphStatus,
     getSession: () => engineSession,
     log,
+    getInterval: () => settings.debugRefreshMs,
   });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -1375,11 +1379,13 @@ function init(context: vscode.ExtensionContext): void {
       const nm = path.join(path.dirname(g.path), process.platform === 'win32' ? 'arm-none-eabi-nm.exe' : 'arm-none-eabi-nm');
       return existsSync(nm) ? nm : undefined;
     },
+    getInterval: () => settings.debugRefreshMs,
   });
   const mem = new MemViewProvider({
     getSession: () => engineSession,
     log,
     memento: context.workspaceState,
+    getInterval: () => settings.debugRefreshMs,
   });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WatchViewProvider.viewType, watch, {
@@ -1851,6 +1857,26 @@ function init(context: vscode.ExtensionContext): void {
     settings = loadSettings();
     log('构建类型已切换为 ' + pick.label + '；构建目录随类型自动切换');
     refresh();
+  });
+
+  register('autoCmakeFlash.chooseRefreshInterval', async () => {
+    const options = [50, 100, 200, 500, 1000];
+    const pick = await vscode.window.showQuickPick(
+      options.map((o) => ({ label: o === settings.debugRefreshMs ? '✓ ' + o + 'ms' : o + 'ms' })),
+      { title: 'Auto CMake Flash — 调试面板刷新间隔（外设/变量/内存共用）', ignoreFocusOut: true },
+    );
+    if (!pick) {
+      return;
+    }
+    const ms = parseInt(pick.label.replace(/[^0-9]/g, ''), 10);
+    const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    await cfg.update('debugRefreshMs', ms, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+    settings = loadSettings();
+    periph.setIntervalMs(settings.debugRefreshMs);
+    watch.setIntervalMs(settings.debugRefreshMs);
+    mem.setIntervalMs(settings.debugRefreshMs);
+    log('调试面板刷新间隔: ' + settings.debugRefreshMs + 'ms');
   });
 
   register('autoCmakeFlash.toggleEngine', async () => {

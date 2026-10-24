@@ -12,6 +12,8 @@ export interface MemViewDeps {
   getSession(): vscode.DebugSession | undefined;
   log(msg: string): void;
   memento: vscode.Memento;
+  /** 调试面板统一刷新间隔 ms */
+  getInterval(): number;
 }
 
 const VIEW_BYTES = 256;
@@ -43,6 +45,11 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
     this.history = this.deps.memento.get<number[]>(HIST_KEY, []);
     this.lastBase = this.deps.memento.get<number>(LAST_KEY, 0x20000000);
     this.postInit();
+  }
+
+  /** 推送统一刷新间隔（设置变更时调用） */
+  setIntervalMs(ms: number): void {
+    void this.view?.webview.postMessage({ cmd: 'interval', ms });
   }
 
   private postInit(): void {
@@ -87,7 +94,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
       }
       case 'read': {
         if (this.visible) {
-          await this.refresh(Number(m.base) || this.lastBase, m.interval ?? 200);
+          await this.refresh(Number(m.base) || this.lastBase, this.deps.getInterval());
         }
         break;
       }
@@ -358,11 +365,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
           jump(state.base + (ev.deltaY > 0 ? step : -step));
         }, { passive: false });
 
-        $('iv').addEventListener('change', () => {
-          state.interval = +$('iv').value;
-          if (state.timer) clearInterval(state.timer);
-          state.timer = setInterval(tick, state.interval);
-        });
+        window.addEventListener('message', (e0) => { if (e0.data.cmd === 'interval') { state.interval = e0.data.ms; if (state.timer) clearInterval(state.timer); state.timer = setInterval(tick, e0.data.ms); } });
         state.timer = setInterval(tick, state.interval);
 
         post({ cmd: 'ready' });

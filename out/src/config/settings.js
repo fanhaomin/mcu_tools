@@ -65,6 +65,7 @@ function loadSettings() {
         gdbServerPath: cfg.get('gdbServerPath', ''),
         cubemxPath: cfg.get('cubemxPath', ''),
         debugEngine: cfg.get('debugEngine', 'cortex-debug') === 'probe-rs' ? 'probe-rs' : 'cortex-debug',
+        debugRefreshMs: clampNumber(cfg.get('debugRefreshMs', 200), 50, 5000, 200),
         probeRsChip: cfg.get('probeRsChip', ''),
         svdFile: cfg.get('svdFile', ''),
         cmakeToolchainFile: cfg.get('cmakeToolchainFile', ''),

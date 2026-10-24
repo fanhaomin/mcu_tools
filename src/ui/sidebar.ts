@@ -378,6 +378,12 @@ export class SidebarProvider implements vscode.TreeDataProvider<TreeNode> {
         commandTitle: '附加调试',
         tooltip: '不重新编译、不写固件，直接连接正在运行的目标芯片调试。',
       }),
+      this.row('刷新间隔设置（点击修改）', {
+        icon: 'clock',
+        command: 'autoCmakeFlash.chooseRefreshInterval',
+        commandTitle: '刷新间隔',
+        tooltip: '外设寄存器 / 变量监控 / 内存视图三个面板共用的实时刷新间隔（50ms-1s）。',
+      }),
     ];
   }
 

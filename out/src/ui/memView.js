@@ -38,6 +38,10 @@ class MemViewProvider {
         this.lastBase = this.deps.memento.get(LAST_KEY, 0x20000000);
         this.postInit();
     }
+    /** 推送统一刷新间隔（设置变更时调用） */
+    setIntervalMs(ms) {
+        void this.view?.webview.postMessage({ cmd: 'interval', ms });
+    }
     postInit() {
         void this.view?.webview.postMessage({
             cmd: 'init',
@@ -72,7 +76,7 @@ class MemViewProvider {
             }
             case 'read': {
                 if (this.visible) {
-                    await this.refresh(Number(m.base) || this.lastBase, m.interval ?? 200);
+                    await this.refresh(Number(m.base) || this.lastBase, this.deps.getInterval());
                 }
                 break;
             }
@@ -340,11 +344,7 @@ class MemViewProvider {
           jump(state.base + (ev.deltaY > 0 ? step : -step));
         }, { passive: false });
 
-        $('iv').addEventListener('change', () => {
-          state.interval = +$('iv').value;
-          if (state.timer) clearInterval(state.timer);
-          state.timer = setInterval(tick, state.interval);
-        });
+        window.addEventListener('message', (e0) => { if (e0.data.cmd === 'interval') { state.interval = e0.data.ms; if (state.timer) clearInterval(state.timer); state.timer = setInterval(tick, e0.data.ms); } });
         state.timer = setInterval(tick, state.interval);
 
         post({ cmd: 'ready' });

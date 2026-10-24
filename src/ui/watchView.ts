@@ -20,6 +20,8 @@ export interface WatchDeps {
   getElf(): string | undefined;
   /** arm-none-eabi-nm 路径（与 ARM GCC 同目录），无则 undefined */
   getNm(): string | undefined;
+  /** 调试面板统一刷新间隔 ms */
+  getInterval(): number;
 }
 
 interface WatchEntry {
@@ -89,6 +91,12 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
     });
     this.entries = this.deps.memento.get<WatchEntry[]>(STORE_KEY, []);
     this.postEntries();
+    void this.view?.webview.postMessage({ cmd: 'interval', ms: this.deps.getInterval() });
+  }
+
+  /** 推送统一刷新间隔（设置变更时调用） */
+  setIntervalMs(ms: number): void {
+    void this.view?.webview.postMessage({ cmd: 'interval', ms });
   }
 
   private async persist(): Promise<void> {
@@ -129,7 +137,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
       }
       case 'read': {
         if (this.visible) {
-          await this.refresh(m.interval ?? 200);
+          await this.refresh(this.deps.getInterval());
         }
         break;
       }
@@ -412,11 +420,7 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
         }
         $('add').addEventListener('click', add);
         $('expr').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') add(); });
-        $('iv').addEventListener('change', () => {
-          state.interval = +$('iv').value;
-          if (state.timer) clearInterval(state.timer);
-          state.timer = setInterval(tick, state.interval);
-        });
+        window.addEventListener('message', (e0) => { if (e0.data.cmd === 'interval') { state.interval = e0.data.ms; if (state.timer) clearInterval(state.timer); state.timer = setInterval(tick, e0.data.ms); } });
         state.timer = setInterval(tick, state.interval);
 
         post({ cmd: 'ready' });

@@ -99,6 +99,11 @@ class WatchViewProvider {
         });
         this.entries = this.deps.memento.get(STORE_KEY, []);
         this.postEntries();
+        void this.view?.webview.postMessage({ cmd: 'interval', ms: this.deps.getInterval() });
+    }
+    /** 推送统一刷新间隔（设置变更时调用） */
+    setIntervalMs(ms) {
+        void this.view?.webview.postMessage({ cmd: 'interval', ms });
     }
     async persist() {
         await this.deps.memento.update(STORE_KEY, this.entries);
@@ -133,7 +138,7 @@ class WatchViewProvider {
             }
             case 'read': {
                 if (this.visible) {
-                    await this.refresh(m.interval ?? 200);
+                    await this.refresh(this.deps.getInterval());
                 }
                 break;
             }
@@ -399,11 +404,7 @@ class WatchViewProvider {
         }
         $('add').addEventListener('click', add);
         $('expr').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') add(); });
-        $('iv').addEventListener('change', () => {
-          state.interval = +$('iv').value;
-          if (state.timer) clearInterval(state.timer);
-          state.timer = setInterval(tick, state.interval);
-        });
+        window.addEventListener('message', (e0) => { if (e0.data.cmd === 'interval') { state.interval = e0.data.ms; if (state.timer) clearInterval(state.timer); state.timer = setInterval(tick, e0.data.ms); } });
         state.timer = setInterval(tick, state.interval);
 
         post({ cmd: 'ready' });

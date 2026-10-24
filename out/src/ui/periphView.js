@@ -21,6 +21,10 @@ class PeriphViewProvider {
     constructor(deps) {
         this.deps = deps;
     }
+    /** 推送统一刷新间隔（设置变更时调用） */
+    setIntervalMs(ms) {
+        void this.view?.webview.postMessage({ cmd: 'interval', ms });
+    }
     resolveWebviewView(view) {
         this.view = view;
         this.visible = true;
@@ -642,6 +646,8 @@ class PeriphViewProvider {
         });
 
         state.timer = setInterval(tick, 200);
+
+        window.addEventListener('message', (e0) => { if (e0.data.cmd === 'interval') { if (state.timer) clearInterval(state.timer); state.timer = setInterval(tick, e0.data.ms); } });
 
         post({ cmd: 'ready' });
       </script>
