@@ -10,6 +10,7 @@ import { isEngineSession, readBlock, sampleWhileRunning } from '../debug/dapHelp
 import { parseEvalHexAddress, parseEvalInt } from '../debug/hexdump';
 import { toHexLE } from '../debug/dapHelpers';
 import { readSymbolTable, SymbolInfo } from '../debug/symbols';
+import { captureTopFrameVariables } from '../debug/stoppedCapture';
 import * as fs from 'fs';
 
 export interface WatchDeps {
@@ -36,6 +37,8 @@ interface WatchEntry {
   resolveTries?: number;
   /** 解析彻底失败（提示改用 0x 地址） */
   resolveFailed?: boolean;
+  /** 断点捕获的 DAP memoryReference（局部变量经此监控） */
+  memRef?: string;
 }
 
 const STORE_KEY = 'acf.watch.entries';
@@ -109,6 +112,41 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
 
   private async persist(): Promise<void> {
     await this.deps.memento.update(STORE_KEY, this.entries);
+  }
+
+  /** 目标暂停（断点/复位停机）时由扩展调用：走变量作用域按名捕获 memoryReference */
+  async onTargetStopped(session: vscode.DebugSession): Promise<void> {
+    if (this.entries.length === 0) {
+      return;
+    }
+    const captured = await captureTopFrameVariables(session);
+    if (captured.size === 0) {
+      return;
+    }
+    let hit = 0;
+    for (const e of this.entries) {
+      if (e.memRef || e.addr !== undefined) {
+        continue;
+      }
+      const c = captured.get(e.expr.replace(/^&/, '').trim()) ?? captured.get(e.expr);
+      if (c) {
+        if (c.memoryReference) {
+          e.memRef = c.memoryReference;
+          e.resolveFailed = false;
+          hit++;
+        } else if (c.value && /^0x[0-9a-f]+/i.test(c.value.trim())) {
+          // 无 memoryReference 但值本身是地址（指针变量）
+          e.memRef = c.value.trim().split(/\s/)[0];
+          e.resolveFailed = false;
+          hit++;
+        }
+      }
+    }
+    if (hit > 0) {
+      this.deps.log('变量监控: 已从断点变量作用域捕获 ' + hit + ' 个条目的内存引用');
+      await this.persist();
+      this.postEntries();
+    }
   }
 
   private async onMessage(m: {
@@ -202,23 +240,34 @@ export class WatchViewProvider implements vscode.WebviewViewProvider {
     const failed: WatchEntry[] = [];
 
     // 1. 已解析地址的：旁路读取
+    const readOne = async (e: WatchEntry) => {
+      const ref = e.memRef ?? (e.addr !== undefined ? `0x${e.addr.toString(16)}` : undefined);
+      if (!ref) {
+        return;
+      }
+      try {
+        const r = (await s.customRequest('readMemory', {
+          memoryReference: ref,
+          count: e.bytes,
+        })) as { data?: string };
+        const buf = Buffer.from(r?.data ?? '', 'base64');
+        if (buf.length > 0) {
+          results[e.expr] = {
+            hex: toHexLE(buf, e.bytes * 8),
+            ok: true,
+            bytes: e.bytes,
+            addr: e.addr ?? 0,
+          };
+          return;
+        }
+      } catch {
+        // 目标运行中不可读（cortex-debug）
+      }
+      failed.push(e);
+      results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr ?? 0 };
+    };
     await Promise.all(
-      this.entries
-        .filter((e) => e.addr !== undefined)
-        .map(async (e) => {
-          const buf = await readBlock(s, e.addr!, e.bytes);
-          if (buf) {
-            results[e.expr] = {
-              hex: toHexLE(buf, e.bytes * 8),
-              ok: true,
-              bytes: e.bytes,
-              addr: e.addr!,
-            };
-          } else {
-            failed.push(e);
-            results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr! };
-          }
-        }),
+      this.entries.filter((e) => e.addr !== undefined || e.memRef).map((e) => readOne(e)),
     );
 
     // 2. 未解析的：优先查 ELF 符号表（离线、零停顿、双引擎通用）

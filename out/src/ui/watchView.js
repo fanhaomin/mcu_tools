@@ -45,6 +45,7 @@ const dapHelpers_1 = require("../debug/dapHelpers");
 const hexdump_1 = require("../debug/hexdump");
 const dapHelpers_2 = require("../debug/dapHelpers");
 const symbols_1 = require("../debug/symbols");
+const stoppedCapture_1 = require("../debug/stoppedCapture");
 const fs = __importStar(require("fs"));
 const STORE_KEY = 'acf.watch.entries';
 const MAX_ENTRIES = 16;
@@ -115,6 +116,41 @@ class WatchViewProvider {
     }
     async persist() {
         await this.deps.memento.update(STORE_KEY, this.entries);
+    }
+    /** 目标暂停（断点/复位停机）时由扩展调用：走变量作用域按名捕获 memoryReference */
+    async onTargetStopped(session) {
+        if (this.entries.length === 0) {
+            return;
+        }
+        const captured = await (0, stoppedCapture_1.captureTopFrameVariables)(session);
+        if (captured.size === 0) {
+            return;
+        }
+        let hit = 0;
+        for (const e of this.entries) {
+            if (e.memRef || e.addr !== undefined) {
+                continue;
+            }
+            const c = captured.get(e.expr.replace(/^&/, '').trim()) ?? captured.get(e.expr);
+            if (c) {
+                if (c.memoryReference) {
+                    e.memRef = c.memoryReference;
+                    e.resolveFailed = false;
+                    hit++;
+                }
+                else if (c.value && /^0x[0-9a-f]+/i.test(c.value.trim())) {
+                    // 无 memoryReference 但值本身是地址（指针变量）
+                    e.memRef = c.value.trim().split(/\s/)[0];
+                    e.resolveFailed = false;
+                    hit++;
+                }
+            }
+        }
+        if (hit > 0) {
+            this.deps.log('变量监控: 已从断点变量作用域捕获 ' + hit + ' 个条目的内存引用');
+            await this.persist();
+            this.postEntries();
+        }
     }
     async onMessage(m) {
         switch (m.cmd) {
@@ -200,23 +236,34 @@ class WatchViewProvider {
         const results = {};
         const failed = [];
         // 1. 已解析地址的：旁路读取
-        await Promise.all(this.entries
-            .filter((e) => e.addr !== undefined)
-            .map(async (e) => {
-            const buf = await (0, dapHelpers_1.readBlock)(s, e.addr, e.bytes);
-            if (buf) {
-                results[e.expr] = {
-                    hex: (0, dapHelpers_2.toHexLE)(buf, e.bytes * 8),
-                    ok: true,
-                    bytes: e.bytes,
-                    addr: e.addr,
-                };
+        const readOne = async (e) => {
+            const ref = e.memRef ?? (e.addr !== undefined ? `0x${e.addr.toString(16)}` : undefined);
+            if (!ref) {
+                return;
             }
-            else {
-                failed.push(e);
-                results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr };
+            try {
+                const r = (await s.customRequest('readMemory', {
+                    memoryReference: ref,
+                    count: e.bytes,
+                }));
+                const buf = Buffer.from(r?.data ?? '', 'base64');
+                if (buf.length > 0) {
+                    results[e.expr] = {
+                        hex: (0, dapHelpers_2.toHexLE)(buf, e.bytes * 8),
+                        ok: true,
+                        bytes: e.bytes,
+                        addr: e.addr ?? 0,
+                    };
+                    return;
+                }
             }
-        }));
+            catch {
+                // 目标运行中不可读（cortex-debug）
+            }
+            failed.push(e);
+            results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr ?? 0 };
+        };
+        await Promise.all(this.entries.filter((e) => e.addr !== undefined || e.memRef).map((e) => readOne(e)));
         // 2. 未解析的：优先查 ELF 符号表（离线、零停顿、双引擎通用）
         const unresolved = this.entries.filter((e) => e.addr === undefined);
         if (unresolved.length > 0) {

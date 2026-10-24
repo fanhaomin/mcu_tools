@@ -1406,6 +1406,23 @@ function init(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // 断点捕获：目标暂停时从变量作用域按名捕获监控条目的内存引用
+  const stopTrackerFactory: vscode.DebugAdapterTrackerFactory = {
+    createDebugAdapterTracker(session: vscode.DebugSession) {
+      return {
+        onDidSendMessage: (m: { type?: string; event?: string }) => {
+          if (m.type === 'event' && m.event === 'stopped' && isEngineSession(session)) {
+            void watch.onTargetStopped(session);
+          }
+        },
+      };
+    },
+  };
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterTrackerFactory('probe-rs-debug', stopTrackerFactory),
+    vscode.debug.registerDebugAdapterTrackerFactory('cortex-debug', stopTrackerFactory),
+  );
+
   const isEngineSession = (s: vscode.DebugSession): boolean =>
     s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
   if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {

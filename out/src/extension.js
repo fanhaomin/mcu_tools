@@ -1145,6 +1145,19 @@ function init(context) {
     }), vscode.window.registerWebviewViewProvider(memView_1.MemViewProvider.viewType, mem, {
         webviewOptions: { retainContextWhenHidden: true },
     }));
+    // 断点捕获：目标暂停时从变量作用域按名捕获监控条目的内存引用
+    const stopTrackerFactory = {
+        createDebugAdapterTracker(session) {
+            return {
+                onDidSendMessage: (m) => {
+                    if (m.type === 'event' && m.event === 'stopped' && isEngineSession(session)) {
+                        void watch.onTargetStopped(session);
+                    }
+                },
+            };
+        },
+    };
+    context.subscriptions.push(vscode.debug.registerDebugAdapterTrackerFactory('probe-rs-debug', stopTrackerFactory), vscode.debug.registerDebugAdapterTrackerFactory('cortex-debug', stopTrackerFactory));
     const isEngineSession = (s) => s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
     if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {
         engineSession = vscode.debug.activeDebugSession;
