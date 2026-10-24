@@ -61,6 +61,7 @@ import { SidebarProvider, flashStatusText, verifyText } from './ui/sidebar';
 import { StatusBar } from './ui/statusBar';
 import { IocLauncherEditorProvider } from './ui/iocLauncherEditor';
 import { ConfigPanel } from './ui/configPanel';
+import { updateWorkspaceSetting } from './config/workspaceSettings';
 import { WatchViewProvider } from './ui/watchView';
 import { MemViewProvider } from './ui/memView';
 import {
@@ -1869,9 +1870,7 @@ function init(context: vscode.ExtensionContext): void {
       return;
     }
     const ms = parseInt(pick.label.replace(/[^0-9]/g, ''), 10);
-    const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    await cfg.update('debugRefreshMs', ms, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+    await updateWorkspaceSetting('debugRefreshMs', ms);
     settings = loadSettings();
     periph.setIntervalMs(settings.debugRefreshMs);
     watch.setIntervalMs(settings.debugRefreshMs);
@@ -1880,11 +1879,9 @@ function init(context: vscode.ExtensionContext): void {
   });
 
   register('autoCmakeFlash.toggleEngine', async () => {
-    const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
-    const cur = cfg.get<string>('debugEngine', 'cortex-debug');
+    const cur = vscode.workspace.getConfiguration('autoCmakeFlash').get<string>('debugEngine', 'cortex-debug');
     const next = cur === 'probe-rs' ? 'cortex-debug' : 'probe-rs';
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    await cfg.update('debugEngine', next, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+    await updateWorkspaceSetting('debugEngine', next);
     settings = loadSettings();
     void vscode.window.showInformationMessage(
       `Auto CMake Flash: 调试引擎已切换为 ${next === 'probe-rs' ? 'probe-rs（旁路直读，零停机）' : 'cortex-debug（停机式）'}。下次调试生效。`,

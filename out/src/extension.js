@@ -66,6 +66,7 @@ const sidebar_1 = require("./ui/sidebar");
 const statusBar_1 = require("./ui/statusBar");
 const iocLauncherEditor_1 = require("./ui/iocLauncherEditor");
 const configPanel_1 = require("./ui/configPanel");
+const workspaceSettings_1 = require("./config/workspaceSettings");
 const watchView_1 = require("./ui/watchView");
 const memView_1 = require("./ui/memView");
 const confirmation_1 = require("./ui/confirmation");
@@ -1547,9 +1548,7 @@ function init(context) {
             return;
         }
         const ms = parseInt(pick.label.replace(/[^0-9]/g, ''), 10);
-        const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        await cfg.update('debugRefreshMs', ms, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+        await (0, workspaceSettings_1.updateWorkspaceSetting)('debugRefreshMs', ms);
         settings = (0, settings_1.loadSettings)();
         periph.setIntervalMs(settings.debugRefreshMs);
         watch.setIntervalMs(settings.debugRefreshMs);
@@ -1557,11 +1556,9 @@ function init(context) {
         log('调试面板刷新间隔: ' + settings.debugRefreshMs + 'ms');
     });
     register('autoCmakeFlash.toggleEngine', async () => {
-        const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
-        const cur = cfg.get('debugEngine', 'cortex-debug');
+        const cur = vscode.workspace.getConfiguration('autoCmakeFlash').get('debugEngine', 'cortex-debug');
         const next = cur === 'probe-rs' ? 'cortex-debug' : 'probe-rs';
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        await cfg.update('debugEngine', next, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+        await (0, workspaceSettings_1.updateWorkspaceSetting)('debugEngine', next);
         settings = (0, settings_1.loadSettings)();
         void vscode.window.showInformationMessage(`Auto CMake Flash: 调试引擎已切换为 ${next === 'probe-rs' ? 'probe-rs（旁路直读，零停机）' : 'cortex-debug（停机式）'}。下次调试生效。`);
         refresh();
