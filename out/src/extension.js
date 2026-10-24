@@ -68,6 +68,7 @@ const iocLauncherEditor_1 = require("./ui/iocLauncherEditor");
 const configPanel_1 = require("./ui/configPanel");
 const workspaceSettings_1 = require("./config/workspaceSettings");
 const watchView_1 = require("./ui/watchView");
+const chartView_1 = require("./ui/chartView");
 const memView_1 = require("./ui/memView");
 const confirmation_1 = require("./ui/confirmation");
 function activate(context) {
@@ -130,10 +131,34 @@ function init(context) {
         logger.info('设置已更新。');
         periph.setIntervalMs(settings.debugRefreshMs);
         watch.setIntervalMs(settings.debugRefreshMs);
+        chart.setIntervalMs();
         mem.setIntervalMs(settings.debugRefreshMs);
         refresh();
     }));
     const configPanel = new configPanel_1.ConfigPanel(log);
+    // 一次性迁移：旧版默认 cmake-build-${buildType} 残留在工程设置里会覆盖新默认，
+    // 检测到即移除（构建目录恢复 build/<构建类型> 两级结构）。
+    // 一次性迁移：旧默认 cmake-build-${buildType} 残留会覆盖新默认 → 移除；
+    // 同时清理 0.9.39 前写入 bug 落在 settings.json 顶层的无前缀死键。
+    void (async () => {
+        try {
+            if (/cmake-build-/i.test(settings.buildDir)) {
+                const legacyDir = settings.buildDir;
+                await (0, workspaceSettings_1.updateWorkspaceSetting)('buildDir', undefined);
+                settings = (0, settings_1.loadSettings)();
+                logger.warn(`已移除旧构建目录设置 "${legacyDir}"；构建目录恢复默认 build/${settings.buildType}（两级目录）`);
+                refresh();
+            }
+            const dead = await (0, workspaceSettings_1.cleanupLegacyDeadKeys)();
+            if (dead.length > 0) {
+                logger.warn(`已清理 settings.json 中的旧遗留无效键: ${dead.join(', ')}`);
+                settings = (0, settings_1.loadSettings)();
+            }
+        }
+        catch {
+            // 迁移失败不阻塞启动；buildDirOf 已对 cmake-build-* 强制归一
+        }
+    })();
     // ---------------- 基础工具 ----------------
     /** 选择工作区根目录（处理未打开工作区 / 多工作区） */
     async function pickRoot() {
@@ -958,6 +983,23 @@ function init(context) {
         if (state.stlink?.status === 'noProbe') {
             void vscode.window.showWarningMessage('Auto CMake Flash: 未检测到 ST-LINK 适配器，调试启动可能失败，请检查连接。');
         }
+        // 会话命名带 工程名+引擎+模式，调试工具栏的会话选择器可区分；
+        // 单探针独占：先结束残留的引擎会话，避免同名会话堆积
+        config.name =
+            `ACF ${state.project?.name ?? root} · ` +
+                (engine === 'probe-rs' ? 'probe-rs' : 'cortex-debug') +
+                (request === 'attach' ? ' · 附加' : '');
+        for (const st of [...liveSessions]) {
+            try {
+                await vscode.debug.stopDebugging(st);
+                liveSessions.delete(st);
+                log(`已结束残留调试会话: ${st.name}`);
+            }
+            catch {
+                // 会话可能已退出
+                liveSessions.delete(st);
+            }
+        }
         const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
         const started = await vscode.debug.startDebugging(folder, config);
         if (!started) {
@@ -1099,6 +1141,8 @@ function init(context) {
     // 自行跟踪引擎会话：不用 activeDebugSession——存在多个/失效会话时它可能指向
     // 非引擎会话，导致面板误判"未在调试会话中"
     let engineSession;
+    /** 活跃的引擎会话（启动新调试前清理，避免同名会话堆积） */
+    const liveSessions = new Set();
     const periph = new periphView_1.PeriphViewProvider({
         getSvd: () => (svdCache ? { device: svdCache.device, file: svdCache.file } : undefined),
         getSvdStatus: () => periphStatus,
@@ -1107,6 +1151,17 @@ function init(context) {
         getInterval: () => settings.debugRefreshMs,
     });
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(periphView_1.PeriphViewProvider.viewType, periph, { webviewOptions: { retainContextWhenHidden: true } }));
+    // 波形面板：数据来自变量监控的每轮采样（onSample），曲线勾选列表来自监控条目
+    // （onEntries）；仅打开波形标签时由其宿主定时器反向驱动监控采样（forceSample）。
+    let watchRef;
+    const chart = new chartView_1.ChartViewProvider({
+        memento: context.workspaceState,
+        log,
+        getInterval: () => settings.debugRefreshMs,
+        getSession: () => engineSession,
+        forceSample: () => watchRef?.forceSample(),
+        onReady: () => watchRef?.syncChart(),
+    });
     const watch = new watchView_1.WatchViewProvider({
         getSession: () => engineSession,
         log,
@@ -1132,8 +1187,19 @@ function init(context) {
             const nm = path.join(path.dirname(g.path), process.platform === 'win32' ? 'arm-none-eabi-nm.exe' : 'arm-none-eabi-nm');
             return (0, path_1.existsSync)(nm) ? nm : undefined;
         },
+        getReadelf: () => {
+            const g = state.toolchain?.tools.armGcc;
+            if (!g?.found || !g.path) {
+                return undefined;
+            }
+            const re = path.join(path.dirname(g.path), process.platform === 'win32' ? 'arm-none-eabi-readelf.exe' : 'arm-none-eabi-readelf');
+            return (0, path_1.existsSync)(re) ? re : undefined;
+        },
         getInterval: () => settings.debugRefreshMs,
+        onEntries: (list) => chart.setEntries(list),
+        onSample: (t, vals) => chart.pushSample(t, vals),
     });
+    watchRef = watch;
     const mem = new memView_1.MemViewProvider({
         getSession: () => engineSession,
         log,
@@ -1141,6 +1207,8 @@ function init(context) {
         getInterval: () => settings.debugRefreshMs,
     });
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(watchView_1.WatchViewProvider.viewType, watch, {
+        webviewOptions: { retainContextWhenHidden: true },
+    }), vscode.window.registerWebviewViewProvider(chartView_1.ChartViewProvider.viewType, chart, {
         webviewOptions: { retainContextWhenHidden: true },
     }), vscode.window.registerWebviewViewProvider(memView_1.MemViewProvider.viewType, mem, {
         webviewOptions: { retainContextWhenHidden: true },
@@ -1171,10 +1239,12 @@ function init(context) {
     context.subscriptions.push(vscode.debug.onDidStartDebugSession((s) => {
         if (isEngineSession(s)) {
             engineSession = s;
+            liveSessions.add(s);
             periph.pushSession();
             void refreshPeripheralSvd();
         }
     }), vscode.debug.onDidTerminateDebugSession((s) => {
+        liveSessions.delete(s);
         if (engineSession && engineSession.id === s.id) {
             engineSession = undefined;
         }
@@ -1548,17 +1618,15 @@ function init(context) {
         const options = ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'];
         const pick = await vscode.window.showQuickPick(options.map((o) => ({
             label: o === settings.buildType ? '$(check) ' + o : o,
-            description: o === 'Debug' ? '调试信息完整，调试用（cmake-build-debug）' :
-                o === 'Release' ? '无调试信息，体积最小（cmake-build-release）' :
-                    o === 'RelWithDebInfo' ? '优化 + 调试信息（cmake-build-relwithdebinfo）' :
-                        '最小体积（cmake-build-minsizerel）',
+            description: o === 'Debug' ? '调试信息完整，调试用（build/Debug）' :
+                o === 'Release' ? '无调试信息，体积最小（build/Release）' :
+                    o === 'RelWithDebInfo' ? '优化 + 调试信息（build/RelWithDebInfo）' :
+                        '最小体积（build/MinSizeRel）',
         })), { title: 'Auto CMake Flash — 选择构建类型', ignoreFocusOut: true });
         if (!pick || pick.label === '$(check) ' + pick.label) {
             return;
         }
-        const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        await cfg.update('buildType', pick.label, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+        await (0, workspaceSettings_1.updateWorkspaceSetting)('buildType', pick.label);
         settings = (0, settings_1.loadSettings)();
         log('构建类型已切换为 ' + pick.label + '；构建目录随类型自动切换');
         refresh();
@@ -1575,6 +1643,7 @@ function init(context) {
         settings.debugRefreshMs = ms; // 直写文件后 Configuration 读取有延迟，先用刚写的值
         periph.setIntervalMs(ms);
         watch.setIntervalMs(ms);
+        chart.setIntervalMs();
         mem.setIntervalMs(ms);
         log('调试面板刷新间隔: ' + ms + 'ms');
     });
@@ -1589,6 +1658,44 @@ function init(context) {
     });
     register('autoCmakeFlash.openSettings', () => {
         configPanel.show();
+    });
+    // 编辑器中选中变量名 → 右键添加到变量监控（DWARF 目录校验）
+    register('autoCmakeFlash.addWatchFromEditor', async () => {
+        const ed = vscode.window.activeTextEditor;
+        if (!ed) {
+            void vscode.window.showWarningMessage('Auto CMake Flash: 没有激活的编辑器。');
+            return;
+        }
+        let name = ed.document.getText(ed.selection).trim();
+        if (!name) {
+            const wr = ed.document.getWordRangeAtPosition(ed.selection.active);
+            if (wr) {
+                name = ed.document.getText(wr).trim();
+            }
+        }
+        if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+            void vscode.window.showWarningMessage('Auto CMake Flash: 请先在代码中选中一个变量名（或把光标放在变量名上再右键）。');
+            return;
+        }
+        const r = await watch.addFromEditor(name);
+        if (r.status === 'added') {
+            void vscode.window.showInformationMessage(`Auto CMake Flash: 已添加 ${name}（${r.var?.type.label} @ 0x${r.var?.addr.toString(16).toUpperCase()}）到变量监控。`);
+        }
+        else if (r.status === 'exists') {
+            void vscode.window.showInformationMessage(`Auto CMake Flash: ${name} 已在监控列表中。`);
+        }
+        else if (r.status === 'full') {
+            void vscode.window.showWarningMessage('Auto CMake Flash: 变量监控条目已满，请先移除部分条目。');
+        }
+        else if (r.status === 'noelf') {
+            void vscode.window.showWarningMessage('Auto CMake Flash: 没有可用的 DWARF 调试信息（先完成一次 Debug 构建，并确认 readelf 工具可用）。');
+        }
+        else {
+            void vscode.window.showWarningMessage(`Auto CMake Flash: ELF 中未找到变量 ${name}（函数内局部变量请打断点捕获；也可能被编译器优化掉）。`);
+        }
+    });
+    register('autoCmakeFlash.browseWatchVars', async () => {
+        await watch.browseAndAdd();
     });
     register('autoCmakeFlash.showWarnings', async () => {
         const w = state.project?.warnings ?? [];

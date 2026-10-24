@@ -52,7 +52,7 @@ function loadSettings() {
     const iface = cfg.get('downloadInterface', 'SWD');
     const reset = cfg.get('resetAfterFlash', 'hardware');
     return {
-        buildDir: cfg.get('buildDir', 'cmake-build-${buildType}') || 'cmake-build-${buildType}',
+        buildDir: cfg.get('buildDir', 'build/${buildType}') || 'build/${buildType}',
         buildType: validTypes.includes(buildType)
             ? buildType
             : 'Debug',

@@ -2,9 +2,8 @@
 /**
  * 工程设置写入器：把 autoCmakeFlash.* 写入当前工程的 .vscode/settings.json。
  *
- * VS Code 对未在 contributes.configuration 声明的键拒绝 Configuration API 的
- * 文件夹级写入（"没有注册配置 ... 因此无法写入文件夹设置"），因此直接编辑
- * settings.json 文件（尽力保留注释：去注释解析后回写格式化 JSON）。
+ * 所有键已在 package.json contributes.configuration 注册（scope: resource），
+ * 走 VS Code Configuration API 正规写入——值传 undefined 即移除自定义项（恢复默认）。
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -41,21 +40,51 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateWorkspaceSetting = updateWorkspaceSetting;
+exports.cleanupLegacyDeadKeys = cleanupLegacyDeadKeys;
 const vscode = __importStar(require("vscode"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+/** 旧版写入 bug 可能落进 settings.json 顶层的无前缀死键（与配置项同名） */
+const LEGACY_DEAD_KEYS = new Set([
+    'buildDir', 'buildType', 'generator', 'cmakeToolchainFile', 'cmakeExtraArgs',
+    'downloadInterface', 'downloadSpeedKhz', 'resetAfterFlash', 'binFlashAddress',
+    'debugEngine', 'probeRsChip', 'gdbPath', 'gdbServerPath', 'svdFile',
+    'cmakePath', 'ninjaPath', 'armToolchainPath', 'programmerCliPath', 'cubemxPath',
+    'verboseLogging', 'buildTimeoutSec', 'flashTimeoutSec', 'debugRefreshMs',
+]);
 async function updateWorkspaceSetting(key, value) {
     const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder) {
+        // 文件夹级写入：scopeUri 在 getConfiguration 上指定（update 本身无此参数）
+        await vscode.workspace
+            .getConfiguration('autoCmakeFlash', folder.uri)
+            .update(key, value, vscode.ConfigurationTarget.WorkspaceFolder);
+    }
+    else {
+        await vscode.workspace
+            .getConfiguration('autoCmakeFlash')
+            .update(key, value, vscode.ConfigurationTarget.Workspace);
+    }
+}
+/**
+ * 一次性清理：删除 settings.json 顶层的旧无前缀死键（0.9.39 前的写入 bug 遗留）。
+ * 返回被删除的键名（空数组 = 无需清理/文件不可解析）。
+ */
+async function cleanupLegacyDeadKeys() {
+    const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) {
-        // 无工作区：退回全局设置（用户级对未注册键可写）
-        await vscode.workspace.getConfiguration('autoCmakeFlash').update(key, value, vscode.ConfigurationTarget.Global);
-        return;
+        return [];
     }
     const file = path.join(folder.uri.fsPath, '.vscode', 'settings.json');
-    let obj = {};
+    let raw = '';
     try {
-        const raw = fs.readFileSync(file, 'utf8');
-        // 尽力剥离注释与尾逗号（容忍 JSONC）
+        raw = fs.readFileSync(file, 'utf8');
+    }
+    catch {
+        return [];
+    }
+    let obj;
+    try {
         const stripped = raw
             .replace(/\/\*[\s\S]*?\*\//g, '')
             .replace(/(^|[^:'"\\])\/\/.*$/gm, '$1')
@@ -63,19 +92,19 @@ async function updateWorkspaceSetting(key, value) {
         obj = JSON.parse(stripped || '{}');
     }
     catch {
-        // 文件不存在 → 从空对象开始；解析失败 → 退回全局写
-        if (fs.existsSync(file)) {
-            await vscode.workspace.getConfiguration('autoCmakeFlash').update(key, value, vscode.ConfigurationTarget.Global);
-            return;
+        return [];
+    }
+    const removed = [];
+    for (const k of Object.keys(obj)) {
+        if (LEGACY_DEAD_KEYS.has(k)) {
+            delete obj[k];
+            removed.push(k);
         }
     }
-    if (value === undefined) {
-        delete obj[key];
+    if (removed.length === 0) {
+        return [];
     }
-    else {
-        obj[key] = value;
-    }
-    await fs.promises.mkdir(path.dirname(file), { recursive: true });
     await fs.promises.writeFile(file, JSON.stringify(obj, null, 2) + '\n', 'utf8');
+    return removed;
 }
 //# sourceMappingURL=workspaceSettings.js.map

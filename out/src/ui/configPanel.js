@@ -68,9 +68,7 @@ class ConfigPanel {
                 title: '构建',
                 icon: '🔧',
                 fields: [
-                    { key: 'buildDir', label: '构建目录', type: 'text', hint: 'cmake-build-${buildType} 自动小写，与 CLion 一致' },
                     { key: 'buildType', label: '构建类型', type: 'enum', options: ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'] },
-                    { key: 'generator', label: 'CMake 生成器', type: 'text', hint: '一般保持 Ninja' },
                     { key: 'cmakeToolchainFile', label: 'CMake 工具链文件', type: 'text', hint: '留空 = 自动识别工程内 cmake/*.cmake' },
                     { key: 'cmakeExtraArgs', label: 'CMake 额外参数', type: 'text', hint: '空格分隔，可留空' },
                 ],
@@ -139,7 +137,8 @@ class ConfigPanel {
         for (const def of defs) {
             const nv = m.values?.[def.key];
             const cv = cur[def.key];
-            if (nv === undefined || nv === cv) {
+            // undefined = 用户选"(默认)"或清空 → 走 API 移除自定义值（不能跳过，否则永远无法恢复默认）
+            if (nv === cv) {
                 continue;
             }
             let value = nv;

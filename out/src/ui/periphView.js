@@ -365,7 +365,12 @@ class PeriphViewProvider {
       .dot.err { background: #f14c4c; }
       #main { flex: 1; display: grid; grid-template-columns: minmax(210px, 26%) 1fr;
               gap: 10px; padding: 8px 10px; overflow: hidden; min-height: 0; }
-      .pane { overflow-y: auto; min-height: 0; }
+      /* 窄面板：左右两栏改上下堆叠，寄存器列表占上部（独立滚动） */
+      @media (max-width: 620px) {
+        #main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 40%) minmax(0, 60%); }
+        #left { border-right: none; border-bottom: 1px solid var(--dim); padding-right: 0; padding-bottom: 6px; }
+      }
+      .pane { overflow: auto; min-height: 0; }
       #left { border-right: 1px solid var(--dim); padding-right: 8px; }
       .cap { font-size: 11px; color: var(--vscode-descriptionForeground);
              text-transform: uppercase; letter-spacing: .08em; margin: 8px 0 5px; }
@@ -382,7 +387,10 @@ class PeriphViewProvider {
       .ri.on { background: color-mix(in srgb, var(--ac) 16%, transparent); }
       .ri .n { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; }
       .ri .v { margin-left: auto; font-family: var(--vscode-editor-font-family, monospace);
-               font-size: 12.5px; font-weight: 600; color: var(--ac); }
+               font-size: 12.5px; font-weight: 600; color: var(--ac); border-radius: 4px; padding: 0 3px; }
+      @keyframes chgflash { from { background: color-mix(in srgb, var(--ac) 32%, transparent); }
+        to { background: transparent; } }
+      .ri .v.chg { animation: chgflash .8s ease-out; }
       .card { border: 1px solid var(--dim); border-radius: 10px; padding: 14px 16px;
               background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
               margin-bottom: 12px; }
@@ -400,8 +408,13 @@ class PeriphViewProvider {
                 border: 1px solid var(--dim); border-radius: 8px; padding: 4px 12px; width: 190px; }
       .bigval:focus { outline: none; border-color: var(--ac); }
       .hint { font-size: 11px; color: var(--vscode-descriptionForeground); }
-      .bits { display: grid; grid-template-columns: repeat(16, 46px); gap: 3px; justify-content: start; margin-top: 10px; }
-      .b { width: 46px; height: 46px; border-radius: 6px; text-align: center; padding: 4px 0 5px;
+      /* 位域格自适应：填满可用宽度自动换行；窄面板固定 8 列一行（可收缩） */
+      .bits { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+              gap: 3px; margin-top: 10px; }
+      @media (max-width: 520px) {
+        .bits { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+      }
+      .b { min-width: 0; height: 46px; border-radius: 6px; text-align: center; padding: 4px 0 5px;
            border: 1px solid var(--dim); user-select: none; }
       .b .i { font-size: 9px; color: var(--vscode-descriptionForeground); }
       .b .v { font-family: var(--vscode-editor-font-family, monospace); font-size: 14px; font-weight: 700; }
@@ -431,12 +444,18 @@ class PeriphViewProvider {
              background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
       .fin:focus { outline: none; border-color: var(--ac); }
       .empty { padding: 30px 12px; text-align: center; color: var(--vscode-descriptionForeground); line-height: 1.7; }
+      .nosess { position: fixed; inset: 0; z-index: 5; display: none;
+        align-items: center; justify-content: center; text-align: center;
+        background: color-mix(in srgb, var(--vscode-sideBar-background) 86%, transparent);
+        color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.9; }
+      .nosess.show { display: flex; }
     </style></head><body>
 
       <div id="main">
         <div class="pane" id="left"></div>
         <div class="pane" id="right"></div>
       </div>
+      <div class="nosess" id="nosess">未在调试中<br>启动调试后这里显示外设寄存器</div>
       <script>
         const vscode = acquireVsCodeApi();
         const state = { svd: false, periphs: [], active: null, regs: [], sel: null,
@@ -570,7 +589,16 @@ class PeriphViewProvider {
             const v = state.vals[k];
             const rn = k.split('.').pop();
             const el = document.querySelector('.ri[data-r="' + rn + '"] .v');
-            if (el) el.textContent = v.hex;
+            if (el) {
+              if (el.textContent !== v.hex) {
+                el.textContent = v.hex;
+                el.classList.remove('chg');
+                void el.offsetWidth; // 重启动画
+                el.classList.add('chg');
+                clearTimeout(el._t);
+                el._t = setTimeout(() => el.classList.remove('chg'), 800);
+              }
+            }
           }
           const r = curReg(); if (!r) return;
           const v = state.vals[state.active + '.' + r.name];
@@ -629,6 +657,7 @@ class PeriphViewProvider {
             updateVals(); // 只更新文字节点，不重建左栏（否则下拉框点开就被销毁）
           } else if (m.cmd === 'session') {
             state.session = m.active; state.engine = m.engine;
+            $('nosess').classList.toggle('show', !m.active);
             if (!m.active) { state.vals = {}; updateVals(); }
 } else if (m.cmd === 'written') { tick(); }
         });

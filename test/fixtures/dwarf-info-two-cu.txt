@@ -1,0 +1,106 @@
+Contents of the .debug_info section:
+
+  Compilation Unit @ offset 0:
+   Length:        0x62 (32-bit)
+   Version:       5
+   Unit Type:     DW_UT_compile (1)
+   Abbrev Offset: 0
+   Pointer Size:  4
+ <0><c>: Abbrev Number: 1 (DW_TAG_compile_unit)
+    <d>   DW_AT_producer    : (indirect string, offset: 0x49): GNU C17 14.3.1 20250623 -mthumb -mcpu=cortex-m4 -mfloat-abi=soft -march=armv7e-m -g -O0
+    <11>   DW_AT_language    : 29	(C11)
+    <12>   DW_AT_name        : a.c
+    <16>   DW_AT_comp_dir    : (indirect string, offset: 0x1f): C:/Users/fhm/AppData/Local/Temp/dwarf-fix
+    <1a>   DW_AT_low_pc      : 0x8000
+    <1e>   DW_AT_high_pc     : 0x1c
+    <22>   DW_AT_stmt_list   : 0
+ <1><26>: Abbrev Number: 2 (DW_TAG_array_type)
+    <27>   DW_AT_type        : <0x36>
+    <2b>   DW_AT_sibling     : <0x36>
+ <2><2f>: Abbrev Number: 3 (DW_TAG_subrange_type)
+    <30>   DW_AT_type        : <0x36>
+    <34>   DW_AT_upper_bound : 2
+ <2><35>: Abbrev Number: 0
+ <1><36>: Abbrev Number: 4 (DW_TAG_base_type)
+    <37>   DW_AT_byte_size   : 4
+    <38>   DW_AT_encoding    : 7	(unsigned)
+    <39>   DW_AT_name        : (indirect string, offset: 0x12): unsigned int
+ <1><3d>: Abbrev Number: 5 (DW_TAG_variable)
+    <3e>   DW_AT_name        : (indirect string, offset: 0x7): au_counter
+    <42>   DW_AT_decl_file   : 1
+    <43>   DW_AT_decl_line   : 1
+    <44>   DW_AT_decl_column : 21
+    <45>   DW_AT_type        : <0x26>
+    <49>   DW_AT_location    : 5 byte block: 3 34 90 0 0 	(DW_OP_addr: 9034)
+ <1><4f>: Abbrev Number: 6 (DW_TAG_subprogram)
+    <50>   DW_AT_external    : 1
+    <50>   DW_AT_name        : (indirect string, offset: 0): across
+    <54>   DW_AT_decl_file   : 1
+    <55>   DW_AT_decl_line   : 2
+    <56>   DW_AT_decl_column : 14
+    <57>   DW_AT_prototyped  : 1
+    <57>   DW_AT_type        : <0x36>
+    <5b>   DW_AT_low_pc      : 0x8000
+    <5f>   DW_AT_high_pc     : 0x1c
+    <63>   DW_AT_frame_base  : 1 byte block: 9c 	(DW_OP_call_frame_cfa)
+    <65>   DW_AT_call_all_calls: 1
+ <1><65>: Abbrev Number: 0
+  Compilation Unit @ offset 0x66:
+   Length:        0x75 (32-bit)
+   Version:       5
+   Unit Type:     DW_UT_compile (1)
+   Abbrev Offset: 0x5d
+   Pointer Size:  4
+ <0><72>: Abbrev Number: 1 (DW_TAG_compile_unit)
+    <73>   DW_AT_producer    : (indirect string, offset: 0x49): GNU C17 14.3.1 20250623 -mthumb -mcpu=cortex-m4 -mfloat-abi=soft -march=armv7e-m -g -O0
+    <77>   DW_AT_language    : 29	(C11)
+    <78>   DW_AT_name        : b.c
+    <7c>   DW_AT_comp_dir    : (indirect string, offset: 0x1f): C:/Users/fhm/AppData/Local/Temp/dwarf-fix
+    <80>   DW_AT_low_pc      : 0x801c
+    <84>   DW_AT_high_pc     : 0x18
+    <88>   DW_AT_stmt_list   : 0x3c
+ <1><8c>: Abbrev Number: 2 (DW_TAG_array_type)
+    <8d>   DW_AT_type        : <0x9c>
+    <91>   DW_AT_sibling     : <0x9c>
+ <2><95>: Abbrev Number: 3 (DW_TAG_subrange_type)
+    <96>   DW_AT_type        : <0x9c>
+    <9a>   DW_AT_upper_bound : 2
+ <2><9b>: Abbrev Number: 0
+ <1><9c>: Abbrev Number: 4 (DW_TAG_base_type)
+    <9d>   DW_AT_byte_size   : 4
+    <9e>   DW_AT_encoding    : 7	(unsigned)
+    <9f>   DW_AT_name        : (indirect string, offset: 0x12): unsigned int
+ <1><a3>: Abbrev Number: 5 (DW_TAG_variable)
+    <a4>   DW_AT_name        : (indirect string, offset: 0x7): au_counter
+    <a8>   DW_AT_decl_file   : 1
+    <a9>   DW_AT_decl_line   : 2
+    <aa>   DW_AT_decl_column : 21
+    <ab>   DW_AT_type        : <0x8c>
+    <af>   DW_AT_location    : 5 byte block: 3 40 90 0 0 	(DW_OP_addr: 9040)
+ <1><b5>: Abbrev Number: 6 (DW_TAG_subprogram)
+    <b6>   DW_AT_external    : 1
+    <b6>   DW_AT_name        : (indirect string, offset: 0): across
+    <ba>   DW_AT_decl_file   : 1
+    <bb>   DW_AT_decl_line   : 1
+    <bc>   DW_AT_decl_column : 21
+    <bd>   DW_AT_prototyped  : 1
+    <bd>   DW_AT_type        : <0x9c>
+    <c1>   DW_AT_declaration : 1
+ <1><c1>: Abbrev Number: 7 (DW_TAG_subprogram)
+    <c2>   DW_AT_external    : 1
+    <c2>   DW_AT_name        : (indirect string, offset: 0xa1): bmain
+    <c6>   DW_AT_decl_file   : 1
+    <c7>   DW_AT_decl_line   : 3
+    <c8>   DW_AT_decl_column : 5
+    <c9>   DW_AT_prototyped  : 1
+    <c9>   DW_AT_type        : <0xd7>
+    <cd>   DW_AT_low_pc      : 0x801c
+    <d1>   DW_AT_high_pc     : 0x18
+    <d5>   DW_AT_frame_base  : 1 byte block: 9c 	(DW_OP_call_frame_cfa)
+    <d7>   DW_AT_call_all_tail_calls: 1
+ <1><d7>: Abbrev Number: 8 (DW_TAG_base_type)
+    <d8>   DW_AT_byte_size   : 4
+    <d9>   DW_AT_encoding    : 5	(signed)
+    <da>   DW_AT_name        : int
+ <1><de>: Abbrev Number: 0
+

@@ -2,7 +2,7 @@
   "name": "auto-cmake-flash",
   "displayName": "Auto CMake Flash (STM32)",
   "description": "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录与校验一体化工具（第一版仅支持 STM32）",
-  "version": "0.9.20",
+  "version": "0.9.48",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
@@ -33,6 +33,13 @@
           "title": "Auto CMake Flash",
           "icon": "resources/auto-cmake-flash.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "auto-cmake-flash-debug",
+          "title": "ACF 调试",
+          "icon": "resources/auto-cmake-flash.svg"
+        }
       ]
     },
     "views": {
@@ -51,6 +58,11 @@
         {
           "id": "autoCmakeFlash.watch",
           "name": "变量监控",
+          "type": "webview"
+        },
+        {
+          "id": "autoCmakeFlash.chart",
+          "name": "波形",
           "type": "webview"
         },
         {
@@ -167,6 +179,16 @@
         "command": "autoCmakeFlash.openSettings",
         "title": "Auto CMake Flash: 打开设置",
         "icon": "$(gear)"
+      },
+      {
+        "command": "autoCmakeFlash.addWatchFromEditor",
+        "title": "Auto CMake Flash: 添加到变量监控",
+        "icon": "$(add)"
+      },
+      {
+        "command": "autoCmakeFlash.browseWatchVars",
+        "title": "Auto CMake Flash: 浏览 ELF 变量并添加监控",
+        "icon": "$(symbol-variable)"
       }
     ],
     "menus": {
@@ -175,6 +197,13 @@
           "command": "autoCmakeFlash.openIoc",
           "when": "resourceExtname == .ioc",
           "group": "navigation@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "autoCmakeFlash.addWatchFromEditor",
+          "when": "editorTextFocus",
+          "group": "navigation@10"
         }
       ],
       "view/title": [
@@ -263,14 +292,175 @@
         },
         {
           "command": "autoCmakeFlash.openSettings"
+        },
+        {
+          "command": "autoCmakeFlash.addWatchFromEditor"
+        },
+        {
+          "command": "autoCmakeFlash.browseWatchVars"
         }
       ]
     },
-    "panels": {
-      "acf-debug": {
-        "id": "auto-cmake-flash-debug",
-        "title": "ACF 调试",
-        "icon": "resources/auto-cmake-flash.svg"
+    "configuration": {
+      "title": "Auto CMake Flash",
+      "properties": {
+        "autoCmakeFlash.buildType": {
+          "type": "string",
+          "scope": "resource",
+          "default": "Debug",
+          "enum": [
+            "Debug",
+            "Release",
+            "RelWithDebInfo",
+            "MinSizeRel"
+          ],
+          "description": "构建类型（产物目录与调试信息量）"
+        },
+        "autoCmakeFlash.cmakeToolchainFile": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "CMake 工具链文件；留空自动识别工程内 cmake/*.cmake"
+        },
+        "autoCmakeFlash.cmakeExtraArgs": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "CMake 配置额外参数（空格分隔）"
+        },
+        "autoCmakeFlash.downloadInterface": {
+          "type": "string",
+          "scope": "resource",
+          "default": "SWD",
+          "enum": [
+            "SWD",
+            "JTAG"
+          ],
+          "description": "烧录/调试接口"
+        },
+        "autoCmakeFlash.downloadSpeedKhz": {
+          "type": "number",
+          "scope": "resource",
+          "default": 4000,
+          "description": "连接速度 kHz（100-24000）"
+        },
+        "autoCmakeFlash.resetAfterFlash": {
+          "type": "string",
+          "scope": "resource",
+          "default": "hardware",
+          "enum": [
+            "hardware",
+            "software",
+            "none"
+          ],
+          "description": "烧录后复位方式"
+        },
+        "autoCmakeFlash.binFlashAddress": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "BIN 烧录基地址（如 0x08010000；烧 ELF/HEX 留空）"
+        },
+        "autoCmakeFlash.debugEngine": {
+          "type": "string",
+          "scope": "resource",
+          "default": "cortex-debug",
+          "enum": [
+            "cortex-debug",
+            "probe-rs"
+          ],
+          "description": "调试引擎：probe-rs 支持运行中旁路直读"
+        },
+        "autoCmakeFlash.probeRsChip": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "probe-rs 芯片名（如 STM32F103C8）；留空自动推导"
+        },
+        "autoCmakeFlash.gdbPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "arm-none-eabi-gdb 路径；留空自动探测"
+        },
+        "autoCmakeFlash.gdbServerPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "ST-LINK_gdbserver 路径；留空自动探测"
+        },
+        "autoCmakeFlash.svdFile": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "SVD 文件路径；留空按芯片型号定位"
+        },
+        "autoCmakeFlash.cmakePath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "CMake 路径；留空自动探测"
+        },
+        "autoCmakeFlash.ninjaPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "Ninja 路径；留空自动探测"
+        },
+        "autoCmakeFlash.armToolchainPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "ARM 工具链 bin 目录或 gcc 完整路径；留空自动探测"
+        },
+        "autoCmakeFlash.programmerCliPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "STM32CubeProgrammer CLI 路径；留空自动探测"
+        },
+        "autoCmakeFlash.cubemxPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "STM32CubeMX.exe 路径；留空自动探测"
+        },
+        "autoCmakeFlash.verboseLogging": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "输出详细日志"
+        },
+        "autoCmakeFlash.buildTimeoutSec": {
+          "type": "number",
+          "scope": "resource",
+          "default": 600,
+          "description": "编译超时（秒）"
+        },
+        "autoCmakeFlash.flashTimeoutSec": {
+          "type": "number",
+          "scope": "resource",
+          "default": 300,
+          "description": "烧录超时（秒）"
+        },
+        "autoCmakeFlash.debugRefreshMs": {
+          "type": "number",
+          "scope": "resource",
+          "default": 200,
+          "description": "调试面板刷新间隔 ms（50-5000）"
+        },
+        "autoCmakeFlash.buildDir": {
+          "type": "string",
+          "scope": "resource",
+          "default": "build/${buildType}",
+          "description": "构建目录；默认 build/Debug 按构建类型分文件夹"
+        },
+        "autoCmakeFlash.generator": {
+          "type": "string",
+          "scope": "resource",
+          "default": "Ninja",
+          "description": "CMake 生成器（一般保持 Ninja）"
+        }
       }
     }
   },
