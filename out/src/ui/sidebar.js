@@ -76,6 +76,7 @@ class SidebarProvider {
                 this.section('构建', 'section-build', 'build'),
                 this.section('烧录', 'section-flash', 'cloud-upload'),
                 this.section('调试', 'section-debug', 'bug'),
+                this.section('配置', 'section-config', 'gear'),
             ];
         }
         const s = this.state();
@@ -90,6 +91,8 @@ class SidebarProvider {
                 return this.flashRows(s);
             case 'section-debug':
                 return this.debugRows(s);
+            case 'section-config':
+                return this.configRows(s);
             default:
                 return [];
         }
@@ -330,13 +333,29 @@ class SidebarProvider {
                 icon: 'debug-alt',
                 command: 'autoCmakeFlash.debug',
                 commandTitle: '编译并调试',
-                tooltip: '编译成功后启动 ST-LINK 调试会话（cortex-debug：ST-LINK GDB Server + arm-none-eabi-gdb），\n固件经 gdb load 写入芯片并运行到 main 断点。',
+                tooltip: '编译成功后启动 ST-LINK 调试会话，固件经调试器写入芯片并运行到 main 断点。',
             }),
             this.row('附加到运行中的目标', {
                 icon: 'debug-disconnect',
                 command: 'autoCmakeFlash.debugAttach',
                 commandTitle: '附加调试',
                 tooltip: '不重新编译、不写固件，直接连接正在运行的目标芯片调试。',
+            }),
+        ];
+    }
+    configRows(_s) {
+        return [
+            this.row('打开配置面板', {
+                icon: 'settings-gear',
+                command: 'autoCmakeFlash.openSettings',
+                commandTitle: '打开配置面板',
+                tooltip: '在交互界面中设置：构建目录/类型/生成器、烧录接口与复位、调试引擎与 GDB 路径、超时等。保存到当前工程的工作区设置。',
+            }),
+            this.row('切换调试引擎', {
+                icon: 'server',
+                command: 'autoCmakeFlash.toggleEngine',
+                commandTitle: '切换调试引擎',
+                tooltip: '在 cortex-debug（停机式）与 probe-rs（旁路直读）之间切换，立即生效。',
             }),
         ];
     }

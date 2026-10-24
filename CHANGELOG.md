@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2026-10-24
+
+### Changed — 配置入口收敛到插件自己的面板
+- 侧边栏新增「配置」分组：「打开配置面板」（交互式设置：构建/烧录/调试引擎/路径/超时，保存到当前工程工作区）与「切换调试引擎」一键切换（cortex-debug ↔ probe-rs）。
+- 配置面板新增「调试引擎」「probe-rs 芯片名」两项。
+- 移除 package.json 的 VS Code 设置页声明（contributes.configuration）：autoCmakeFlash.* 不再出现在 VS Code 设置 UI，全部通过插件配置面板管理。已有的 settings.json 值仍然生效。
+
 ## [0.8.1] - 2026-10-24
 
 ### Fixed — 默认构建目录两处关键修正

@@ -1484,9 +1484,21 @@ function init(context) {
     register('autoCmakeFlash.showLogs', () => {
         channel.show(true);
     });
+    register('autoCmakeFlash.toggleEngine', async () => {
+        const cfg = vscode.workspace.getConfiguration('autoCmakeFlash');
+        const cur = cfg.get('debugEngine', 'cortex-debug');
+        const next = cur === 'probe-rs' ? 'cortex-debug' : 'probe-rs';
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        await cfg.update('debugEngine', next, folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global);
+        settings = (0, settings_1.loadSettings)();
+        void vscode.window.showInformationMessage(`Auto CMake Flash: 调试引擎已切换为 ${next === 'probe-rs' ? 'probe-rs（旁路直读，零停机）' : 'cortex-debug（停机式）'}。下次调试生效。`);
+        refresh();
+    });
     register('autoCmakeFlash.openSettings', async () => {
         const items = [
             { key: 'buildDir', label: '构建目录', kind: 'string', hint: '填 build 时自动按类型分 Debug/Release 子目录，也支持 ${buildType}' },
+            { key: 'debugEngine', label: '调试引擎', kind: 'enum', options: ['cortex-debug', 'probe-rs'], hint: 'probe-rs 支持运行中旁路直读寄存器' },
+            { key: 'probeRsChip', label: 'probe-rs 芯片名', kind: 'string', hint: '如 STM32F103C8，留空按识别型号自动推导' },
             { key: 'buildType', label: '构建类型', kind: 'enum', options: ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'] },
             { key: 'generator', label: 'CMake 生成器', kind: 'string', hint: '一般保持 Ninja' },
             { key: 'cmakeToolchainFile', label: 'CMake 工具链文件', kind: 'string', hint: '留空 = 自动识别工程内 cmake/*.cmake' },
