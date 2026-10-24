@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 
 export interface AutoCmakeFlashSettings {
-  /** 相对工作区根目录或绝对路径，默认 build-auto */
+  /** 相对工作区根目录或绝对路径，默认 cmake-build-<小写buildType>（CLion 风格） */
   buildDir: string;
   buildType: 'Debug' | 'Release' | 'RelWithDebInfo' | 'MinSizeRel';
   generator: string;
@@ -50,7 +50,7 @@ export function loadSettings(): AutoCmakeFlashSettings {
   const iface = cfg.get<string>('downloadInterface', 'SWD');
   const reset = cfg.get<string>('resetAfterFlash', 'hardware');
   return {
-    buildDir: cfg.get<string>('buildDir', 'build-auto') || 'build-auto',
+    buildDir: cfg.get<string>('buildDir', 'cmake-build-') || 'cmake-build-',
     buildType: (validTypes as string[]).includes(buildType)
       ? (buildType as AutoCmakeFlashSettings['buildType'])
       : 'Debug',

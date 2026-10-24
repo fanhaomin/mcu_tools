@@ -3,7 +3,7 @@
  * CMake 配置。
  *
  * 安全策略：
- * - 只在插件专用构建目录（默认 build-auto）中生成文件；
+ * - 只在插件专用构建目录（默认 cmake-build-<小写buildType>，CLion 风格）中生成文件；
  * - 不覆盖用户已有的 CMakeLists.txt；
  * - 目录非空且不是插件创建的 → 必须用户确认后才能继续；
  * - 工程已自带工具链配置（如 CubeMX CMake 工程）→ 不注入 CMAKE_TOOLCHAIN_FILE。

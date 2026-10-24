@@ -253,7 +253,7 @@ function makeCubeMxProject(root) {
         (0, fixtures_1.cleanup)(root3);
     }
 });
-(0, node_test_1.test)('CLion 工程：cmake-build-debug 识别、CMakeCache 证据、CLion 构建产物可被发现、内联工具链不注入', async () => {
+(0, node_test_1.test)('CLion 共用构建目录：cmake-build-debug 为插件目录、CMakeCache 证据、产物可被发现、内联工具链不注入', async () => {
     const root = (0, fixtures_1.makeTempDir)();
     try {
         // CLion 模板风格：CMakeLists 内联设置编译器，链接脚本无 _FLASH 后缀
@@ -268,7 +268,7 @@ function makeCubeMxProject(root) {
         (0, fixtures_1.write)(root, 'startup/startup_stm32f103xb.s', '');
         (0, fixtures_1.write)(root, 'src/main.c', '');
         (0, fixtures_1.write)(root, '.idea/workspace.xml', '');
-        // CLion 默认构建目录：含 CMakeCache（生成器 + 芯片宏证据）和编译出的 ELF
+        // CLion 默认构建目录（与插件默认同名，直接共用）：含 CMakeCache 与编译出的 ELF
         (0, fixtures_1.write)(root, 'cmake-build-debug/CMakeCache.txt', [
             'CMAKE_GENERATOR:INTERNAL=Ninja',
             'CMAKE_BUILD_TYPE:STRING=Debug',
@@ -280,7 +280,7 @@ function makeCubeMxProject(root) {
         strict_1.default.equal(info.mcu.base, 'STM32F103');
         strict_1.default.equal(info.mcu.confidence, 'high', 'CMakeCache 宏 + 链接脚本 + 启动文件 = 10 分');
         strict_1.default.equal(info.hasToolchainConfig, true, 'CLion 内联 set(CMAKE_C_COMPILER) 应视为已配置工具链');
-        strict_1.default.ok(info.foreignBuildDirs.some((d) => d.endsWith('cmake-build-debug')), 'cmake-build-debug 应识别为外部构建目录（只读，不改动）');
+        strict_1.default.equal(info.foreignBuildDirs.length, 0, 'cmake-build-debug 现为插件默认目录名，应识别为插件构建目录而非外部目录');
         strict_1.default.deepEqual(info.cmakeGenerators, ['Ninja']);
         strict_1.default.ok(info.artifacts.some((a) => a.path.endsWith('clion_stm32.elf')), 'CLion 编译出的 ELF 应可被“烧录现有固件”发现');
         strict_1.default.ok(info.linkerScripts.some((f) => f.endsWith('STM32F103C8Tx.ld')));

@@ -18,7 +18,7 @@ import {
 } from '../types';
 import { statSafe, walk, readTextFile, ensureDir } from '../util/path';
 
-export const BUILD_STATE_FILE = 'auto-cmake-flash.buildstate.json';
+export const BUILD_STATE_FILE = 'buildstate.json';
 
 /** mtime 与构建开始时间比较的容差（毫秒），容忍文件系统时间粒度误差 */
 export const FRESHNESS_TOLERANCE_MS = 2000;

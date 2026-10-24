@@ -69,7 +69,7 @@ code --install-extension auto-cmake-flash-0.1.0.vsix
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `buildDir` | `build-auto` | 插件专用构建目录（相对工作区或绝对路径） |
+| `buildDir` | `cmake-build-${buildType}` | 插件专用构建目录（CLion 风格；`${buildType}` 自动小写，Debug → `cmake-build-debug`） |
 | `buildType` | `Debug` | Debug / Release / RelWithDebInfo / MinSizeRel |
 | `generator` | `Ninja` | CMake 生成器；Ninja 缺失时可改 `"MinGW Makefiles"` 等 |
 | `cmakePath` / `ninjaPath` / `programmerCliPath` | 空 | 手动指定可执行文件完整路径 |

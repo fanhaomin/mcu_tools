@@ -196,7 +196,7 @@ function init(context: vscode.ExtensionContext): void {
   function discoverTargets(root: string): string[] {
     const fs = require('fs') as typeof import('fs');
     const found = new Set<string>();
-    const skipDirs = new Set(['.git', '.auto-cmake-flash', 'build', 'build-auto']);
+    const skipDirs = new Set(['.git', '.auto-cmake-flash', 'build', 'build-auto', 'cmake-build-debug', 'cmake-build-release']);
     const re = /\b(?:add_executable|add_custom_target)\s*\(\s*([A-Za-z0-9_.+-]+)/g;
     const walk = (dir: string, depth: number): void => {
       if (depth > 6) {
@@ -243,6 +243,8 @@ function init(context: vscode.ExtensionContext): void {
     // 支持 ${buildType} 占位符；值为 "build" 时自动按构建类型分子目录
     // （build/Debug、build/Release），与 CLion CMakePresets 的 binaryDir 约定一致。
     let resolved = bd.split('${buildType}').join(settings.buildType);
+    // CLion 命名统一：cmake-build-<Type> 的类型段统一小写（cmake-build-debug / release）
+    resolved = resolved.replace(/([\\/])cmake-build-([^\\/]+)$/i, (m0, sep, t) => sep + 'cmake-build-' + t.toLowerCase());
     if (!path.isAbsolute(resolved) && /(^|[\\/])build([\\/])?$/i.test(resolved)) {
       resolved = `${resolved.replace(/[\\/]$/, '')}/${settings.buildType}`;
     }
@@ -596,7 +598,7 @@ function init(context: vscode.ExtensionContext): void {
                 : 'CMake 对裸机交叉编译器的默认链接测试失败（工程未设置 CMAKE_TRY_COMPILE_TARGET_TYPE）。\n') +
               '是否使用插件生成的工具链文件重试一次？\n' +
               '该文件指向已检测到的 ARM GCC，并设置 CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY（跳过链接级测试，裸机工程标准做法）。\n' +
-              '将写入 .auto-cmake-flash/ 目录并清理 build-auto 的 CMake 缓存残留；你的 CMakeLists.txt 不会被修改。',
+              '将写入 .auto-cmake-flash/ 目录并清理构建目录的 CMake 缓存残留；你的 CMakeLists.txt 不会被修改。',
           },
           { title: '使用插件工具链重试', value: 'retry' },
         );
@@ -784,7 +786,7 @@ function init(context: vscode.ExtensionContext): void {
     }
     const buildDir = buildDirOf(root);
     const logText = await readTextFile(
-      path.join(buildDir, 'auto-cmake-flash-last-build.log'),
+      path.join(buildDir, 'last-build.log'),
       1024 * 1024,
     );
     if (!logText || !/selected processor does not support/i.test(logText)) {

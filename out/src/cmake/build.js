@@ -201,7 +201,7 @@ async function saveBuildLog(buildDir, record, output) {
             '',
             output.slice(0, 1024 * 1024),
         ].join('\n');
-        await fs.promises.writeFile(path.join(buildDir, 'auto-cmake-flash-last-build.log'), text, 'utf8');
+        await fs.promises.writeFile(path.join(buildDir, 'last-build.log'), text, 'utf8');
     }
     catch {
         /* 日志写失败不影响主流程 */

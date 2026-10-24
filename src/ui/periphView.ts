@@ -421,7 +421,7 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       .ri.on { background: color-mix(in srgb, var(--ac) 16%, transparent); }
       .ri .n { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; }
       .ri .v { margin-left: auto; font-family: var(--vscode-editor-font-family, monospace);
-               font-size: 10.5px; color: var(--vscode-descriptionForeground); }
+               font-size: 12.5px; font-weight: 600; color: var(--ac); }
       .card { border: 1px solid var(--dim); border-radius: 10px; padding: 14px 16px;
               background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
               margin-bottom: 12px; }

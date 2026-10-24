@@ -18,7 +18,7 @@ const debugConfig_1 = require("../src/debug/debugConfig");
 (0, node_test_1.test)('launch 配置：flash + 复位停机 + SVD 下发到 coreConfigs', () => {
     const c = (0, debugConfig_1.buildProbeRsLaunch)({
         root: 'D:\\work\\proj',
-        elfPath: 'D:\\work\\proj\\build-auto\\cs_test.elf',
+        elfPath: 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf',
         chip: 'STM32F103C8',
         interface: 'SWD',
         speedKhz: 4000,
@@ -32,7 +32,7 @@ const debugConfig_1 = require("../src/debug/debugConfig");
     strict_1.default.equal(c.wireProtocol, 'Swd');
     const cj = (0, debugConfig_1.buildProbeRsLaunch)({
         root: 'D:\\work\\proj',
-        elfPath: 'D:\\work\\proj\\build-auto\\cs_test.elf',
+        elfPath: 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf',
         chip: 'STM32F103C8',
         interface: 'JTAG',
         speedKhz: 4000,
@@ -43,7 +43,7 @@ const debugConfig_1 = require("../src/debug/debugConfig");
     const cores = c.coreConfigs;
     strict_1.default.equal(cores.length, 1);
     strict_1.default.equal(cores[0].coreIndex, 0);
-    strict_1.default.equal(cores[0].programBinary, 'D:\\work\\proj\\build-auto\\cs_test.elf');
+    strict_1.default.equal(cores[0].programBinary, 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf');
     strict_1.default.equal(cores[0].svdFile, 'D:\\svd\\STM32F103.svd');
     const flash = c.flashingConfig;
     strict_1.default.equal(flash.flashingEnabled, true, 'launch 应由调试会话烧写固件');
@@ -53,7 +53,7 @@ const debugConfig_1 = require("../src/debug/debugConfig");
 (0, node_test_1.test)('attach 配置：不烧写、不复位', () => {
     const c = (0, debugConfig_1.buildProbeRsLaunch)({
         root: 'D:\\work\\proj',
-        elfPath: 'D:\\work\\proj\\build-auto\\cs_test.elf',
+        elfPath: 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf',
         chip: 'STM32F103C8',
         interface: 'SWD',
         speedKhz: 4000,

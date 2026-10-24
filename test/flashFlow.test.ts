@@ -18,8 +18,8 @@ import { checkFlashPreconditions } from '../src/cmake/artifacts';
 import { BuildRecord, FirmwareArtifact, McuInfo, unknownMcu } from '../src/types';
 
 const NOW = Date.now();
-const ELF_PATH = 'C:\\proj\\build-auto\\firmware.elf';
-const BIN_PATH = 'C:\\proj\\build-auto\\firmware.bin';
+const ELF_PATH = 'C:\\proj\\cmake-build-debug\\firmware.elf';
+const BIN_PATH = 'C:\\proj\\cmake-build-debug\\firmware.bin';
 
 function okResult(partial: Partial<ProcResult>): ProcResult {
   return {
@@ -80,7 +80,7 @@ const KNOWN_MCU: McuInfo = {
 const GOOD_BUILD: BuildRecord = {
   id: 'b-1',
   root: 'C:\\proj',
-  buildDir: 'C:\\proj\\build-auto',
+  buildDir: 'C:\\proj\\cmake-build-debug',
   buildType: 'Debug',
   success: true,
   exitCode: 0,

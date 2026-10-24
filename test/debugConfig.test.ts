@@ -23,7 +23,7 @@ import {
 
 const baseSpec = {
   root: 'D:\\work\\proj',
-  elfPath: 'D:\\work\\proj\\build-auto\\fw.elf',
+  elfPath: 'D:\\work\\proj\\cmake-build-debug\\fw.elf',
   device: 'STM32F103C8',
   interface: 'SWD' as const,
   gdbPath: 'C:\\ST\\CLT\\GNU-tools-for-STM32\\bin\\arm-none-eabi-gdb.exe',

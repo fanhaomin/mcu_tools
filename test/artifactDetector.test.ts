@@ -25,7 +25,7 @@ function freshRecord(success: boolean, startedAt = NOW - 10_000): BuildRecord {
   return {
     id: 'b-test',
     root: 'C:\\proj',
-    buildDir: 'C:\\proj\\build-auto',
+    buildDir: 'C:\\proj\\cmake-build-debug',
     buildType: 'Debug',
     success,
     exitCode: success ? 0 : 1,
@@ -40,7 +40,7 @@ function artifact(
   mtimeMs: number,
   name = `firmware.${fmt}`,
 ): FirmwareArtifact {
-  return { path: `C:\\proj\\build-auto\\${name}`, format: fmt, mtimeMs, sizeBytes: 1024 };
+  return { path: `C:\\proj\\cmake-build-debug\\${name}`, format: fmt, mtimeMs, sizeBytes: 1024 };
 }
 
 test('ELF/HEX/BIN 文件识别：从构建目录真实扫描', async () => {
@@ -224,14 +224,14 @@ test('构建状态持久化：写入后可读回（含上次构建记录）', as
     assert.ok(after);
     assert.equal(after!.createdByAutoCmakeFlash, true);
     assert.equal(after!.lastBuild!.id, 'b-test');
-    assert.equal(path.basename(after?.lastBuild!.buildDir ?? ''), 'build-auto');
+    assert.equal(path.basename(after?.lastBuild!.buildDir ?? ''), 'cmake-build-debug');
   } finally {
     cleanup(tmp);
   }
 });
 
 test('BUILD_STATE_FILE 位于构建目录根部', () => {
-  assert.equal(BUILD_STATE_FILE, 'auto-cmake-flash.buildstate.json');
+  assert.equal(BUILD_STATE_FILE, 'buildstate.json');
 });
 
 test('配置判定：只有 CMakeCache 而无 build.ninja 时不得视为已配置（防跳过配置直接编译）', async () => {

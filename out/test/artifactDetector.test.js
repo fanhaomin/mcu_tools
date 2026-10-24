@@ -52,7 +52,7 @@ function freshRecord(success, startedAt = NOW - 10_000) {
     return {
         id: 'b-test',
         root: 'C:\\proj',
-        buildDir: 'C:\\proj\\build-auto',
+        buildDir: 'C:\\proj\\cmake-build-debug',
         buildType: 'Debug',
         success,
         exitCode: success ? 0 : 1,
@@ -62,7 +62,7 @@ function freshRecord(success, startedAt = NOW - 10_000) {
     };
 }
 function artifact(fmt, mtimeMs, name = `firmware.${fmt}`) {
-    return { path: `C:\\proj\\build-auto\\${name}`, format: fmt, mtimeMs, sizeBytes: 1024 };
+    return { path: `C:\\proj\\cmake-build-debug\\${name}`, format: fmt, mtimeMs, sizeBytes: 1024 };
 }
 (0, node_test_1.test)('ELF/HEX/BIN 文件识别：从构建目录真实扫描', async () => {
     const tmp = (0, fixtures_1.makeTempDir)();
@@ -227,14 +227,14 @@ function artifact(fmt, mtimeMs, name = `firmware.${fmt}`) {
         strict_1.default.ok(after);
         strict_1.default.equal(after.createdByAutoCmakeFlash, true);
         strict_1.default.equal(after.lastBuild.id, 'b-test');
-        strict_1.default.equal(path.basename(after?.lastBuild.buildDir ?? ''), 'build-auto');
+        strict_1.default.equal(path.basename(after?.lastBuild.buildDir ?? ''), 'cmake-build-debug');
     }
     finally {
         (0, fixtures_1.cleanup)(tmp);
     }
 });
 (0, node_test_1.test)('BUILD_STATE_FILE 位于构建目录根部', () => {
-    strict_1.default.equal(artifacts_1.BUILD_STATE_FILE, 'auto-cmake-flash.buildstate.json');
+    strict_1.default.equal(artifacts_1.BUILD_STATE_FILE, 'buildstate.json');
 });
 (0, node_test_1.test)('配置判定：只有 CMakeCache 而无 build.ninja 时不得视为已配置（防跳过配置直接编译）', async () => {
     const { isConfigured, readCMakeCacheInfo } = await Promise.resolve().then(() => __importStar(require('../src/cmake/build')));

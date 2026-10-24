@@ -220,7 +220,7 @@ async function detectProject(root) {
                 }
             }
             else if (BUILD_DIR_RE.test(ent.name)) {
-                if (/^build-auto$/i.test(ent.name)) {
+                if (/^(build-auto|cmake-build-.+)$/i.test(ent.name)) {
                     buildAutoDir = full;
                 }
                 else {
@@ -318,8 +318,8 @@ async function detectProject(root) {
     for (const tf of toolchainFiles.slice(0, 10)) {
         await scanTextFileForChips(ctx, tf, 'toolchainFile', 4);
     }
-    // 5) 已有构建目录的 CMakeCache（生成器、构建类型、芯片宏）
-    for (const bd of foreignBuildDirs) {
+    // 5) 已有构建目录的 CMakeCache（生成器、构建类型、芯片宏）——含插件/CLion 共用目录
+    for (const bd of [...foreignBuildDirs, ...(buildAutoDir ? [buildAutoDir] : [])]) {
         const cache = await (0, path_1.readTextFile)(path.join(bd, 'CMakeCache.txt'), 1024 * 1024);
         if (!cache) {
             continue;
@@ -332,10 +332,7 @@ async function detectProject(root) {
     }
     // 6) 固件产物：根目录（仅根层文件）+ 已有构建目录（如 CLion 的 cmake-build-debug，
     //    支持直接烧录 CLion 编译出的固件）+ 插件构建目录
-    artifactDirs.push(root, ...foreignBuildDirs);
-    if (buildAutoDir) {
-        artifactDirs.push(buildAutoDir);
-    }
+    artifactDirs.push(root, ...foreignBuildDirs, ...(buildAutoDir ? [buildAutoDir] : []));
     const artifacts = await collectArtifacts([...new Set(artifactDirs)], 3);
     // 7) 工具链配置判定：必须存在"实际设置编译器/工具链"的证据，
     //    单纯提及 toolchain/arm-none-eabi 字样不算（否则会误判并跳过工具链注入）
@@ -368,7 +365,7 @@ async function detectProject(root) {
         ctx.warnings.push('未找到 CMakeLists.txt，无法执行 CMake 配置与编译。');
     }
     if (foreignBuildDirs.length > 0) {
-        ctx.warnings.push(`检测到已有构建目录: ${foreignBuildDirs.map((d) => path.basename(d)).join('、')}。插件只会使用专用目录 build-auto，不会改动它们。`);
+        ctx.warnings.push(`检测到已有构建目录: ${foreignBuildDirs.map((d) => path.basename(d)).join('、')}。插件只会使用专用构建目录，不会改动它们。`);
     }
     const mcu = (0, stm32Detector_1.combineEvidence)(ctx.evidence);
     const recognized = hasIoc || !!ctx.halDriverDir || !!mcu.family || ctx.evidence.length > 0;

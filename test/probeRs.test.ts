@@ -20,7 +20,7 @@ test('芯片名推导：去封装后缀，家族名返回 undefined', () => {
 test('launch 配置：flash + 复位停机 + SVD 下发到 coreConfigs', () => {
   const c = buildProbeRsLaunch({
     root: 'D:\\work\\proj',
-    elfPath: 'D:\\work\\proj\\build-auto\\cs_test.elf',
+    elfPath: 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf',
     chip: 'STM32F103C8',
     interface: 'SWD',
     speedKhz: 4000,
@@ -34,7 +34,7 @@ test('launch 配置：flash + 复位停机 + SVD 下发到 coreConfigs', () => {
   assert.equal(c.wireProtocol, 'Swd');
   const cj = buildProbeRsLaunch({
     root: 'D:\\work\\proj',
-    elfPath: 'D:\\work\\proj\\build-auto\\cs_test.elf',
+    elfPath: 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf',
     chip: 'STM32F103C8',
     interface: 'JTAG',
     speedKhz: 4000,
@@ -45,7 +45,7 @@ test('launch 配置：flash + 复位停机 + SVD 下发到 coreConfigs', () => {
   const cores = c.coreConfigs as Array<Record<string, unknown>>;
   assert.equal(cores.length, 1);
   assert.equal(cores[0].coreIndex, 0);
-  assert.equal(cores[0].programBinary, 'D:\\work\\proj\\build-auto\\cs_test.elf');
+  assert.equal(cores[0].programBinary, 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf');
   assert.equal(cores[0].svdFile, 'D:\\svd\\STM32F103.svd');
   const flash = c.flashingConfig as Record<string, unknown>;
   assert.equal(flash.flashingEnabled, true, 'launch 应由调试会话烧写固件');
@@ -56,7 +56,7 @@ test('launch 配置：flash + 复位停机 + SVD 下发到 coreConfigs', () => {
 test('attach 配置：不烧写、不复位', () => {
   const c = buildProbeRsLaunch({
     root: 'D:\\work\\proj',
-    elfPath: 'D:\\work\\proj\\build-auto\\cs_test.elf',
+    elfPath: 'D:\\work\\proj\\cmake-build-debug\\cs_test.elf',
     chip: 'STM32F103C8',
     interface: 'SWD',
     speedKhz: 4000,

@@ -249,7 +249,7 @@ test('工具链配置判定：set(CMAKE_C_COMPILER) 或 CMakeLists 引用工具�
   }
 });
 
-test('CLion 工程：cmake-build-debug 识别、CMakeCache 证据、CLion 构建产物可被发现、内联工具链不注入', async () => {
+test('CLion 共用构建目录：cmake-build-debug 为插件目录、CMakeCache 证据、产物可被发现、内联工具链不注入', async () => {
   const root = makeTempDir();
   try {
     // CLion 模板风格：CMakeLists 内联设置编译器，链接脚本无 _FLASH 后缀
@@ -268,7 +268,7 @@ test('CLion 工程：cmake-build-debug 识别、CMakeCache 证据、CLion 构建
     write(root, 'startup/startup_stm32f103xb.s', '');
     write(root, 'src/main.c', '');
     write(root, '.idea/workspace.xml', '');
-    // CLion 默认构建目录：含 CMakeCache（生成器 + 芯片宏证据）和编译出的 ELF
+    // CLion 默认构建目录（与插件默认同名，直接共用）：含 CMakeCache 与编译出的 ELF
     write(
       root,
       'cmake-build-debug/CMakeCache.txt',
@@ -286,9 +286,10 @@ test('CLion 工程：cmake-build-debug 识别、CMakeCache 证据、CLion 构建
     assert.equal(info.mcu.confidence, 'high', 'CMakeCache 宏 + 链接脚本 + 启动文件 = 10 分');
     assert.equal(info.hasToolchainConfig, true, 'CLion 内联 set(CMAKE_C_COMPILER) 应视为已配置工具链');
 
-    assert.ok(
-      info.foreignBuildDirs.some((d) => d.endsWith('cmake-build-debug')),
-      'cmake-build-debug 应识别为外部构建目录（只读，不改动）',
+    assert.equal(
+      info.foreignBuildDirs.length,
+      0,
+      'cmake-build-debug 现为插件默认目录名，应识别为插件构建目录而非外部目录',
     );
     assert.deepEqual(info.cmakeGenerators, ['Ninja']);
     assert.ok(

@@ -42,9 +42,10 @@ const vscode = __importStar(require("vscode"));
 class StatusBar {
     buildBtn;
     flashBtn;
+    debugBtn;
     projectBtn;
     constructor() {
-        // 状态栏左侧快捷按钮：编译 / 烧录（一键执行，无需打开插件面板）
+        // 状态栏左侧快捷按钮：编译 / 烧录 / 调试（一键执行，无需打开插件面板）
         this.buildBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 62);
         this.buildBtn.name = 'Auto CMake Flash 编译';
         this.buildBtn.text = '$(zap) 编译';
@@ -55,6 +56,12 @@ class StatusBar {
         this.flashBtn.text = '$(rocket) 烧录';
         this.flashBtn.tooltip = '编译并烧录到目标芯片（Auto CMake Flash）';
         this.flashBtn.command = 'autoCmakeFlash.buildAndFlash';
+        // 调试按钮（烧录右侧）：编译并调试
+        this.debugBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 60);
+        this.debugBtn.name = 'Auto CMake Flash 调试';
+        this.debugBtn.text = '$(debug-alt) 调试';
+        this.debugBtn.tooltip = '编译并调试（Auto CMake Flash）';
+        this.debugBtn.command = 'autoCmakeFlash.debug';
         // 工程/目标选择按钮（最左）：显示当前工程名与编译目标，点击打开选择下拉框
         this.projectBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 63);
         this.projectBtn.name = 'Auto CMake Flash 工程/目标';
@@ -78,13 +85,17 @@ class StatusBar {
             state.busy === 'build' ? '$(sync~spin) 编译中' : '$(zap) 编译';
         this.flashBtn.text =
             state.busy === 'flash' ? '$(sync~spin) 烧录中' : '$(rocket) 烧录';
+        this.debugBtn.text =
+            state.busy === 'debug' ? '$(sync~spin) 调试中' : '$(debug-alt) 调试';
         this.buildBtn.show();
         this.flashBtn.show();
+        this.debugBtn.show();
     }
     dispose() {
         this.projectBtn.dispose();
         this.buildBtn.dispose();
         this.flashBtn.dispose();
+        this.debugBtn.dispose();
     }
 }
 exports.StatusBar = StatusBar;

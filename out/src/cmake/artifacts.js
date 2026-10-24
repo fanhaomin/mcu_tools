@@ -52,7 +52,7 @@ exports.readPersistedState = readPersistedState;
 exports.writePersistedState = writePersistedState;
 const path = __importStar(require("path"));
 const path_1 = require("../util/path");
-exports.BUILD_STATE_FILE = 'auto-cmake-flash.buildstate.json';
+exports.BUILD_STATE_FILE = 'buildstate.json';
 /** mtime 与构建开始时间比较的容差（毫秒），容忍文件系统时间粒度误差 */
 exports.FRESHNESS_TOLERANCE_MS = 2000;
 /** 递归查找构建目录中的固件产物（跳过 CMakeFiles 内部） */
