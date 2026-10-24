@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.19] - 2026-10-24
+
+### Changed — 面板不可见时彻底停更
+- 底部三个面板（外设/变量/内存）切到其他标签页时，宿主通知 webview 停止定时器（此前只是宿主忽略读取，webview 空转）；切回来自动恢复。刷新间隔由侧边栏「调试」分组统一设置。
+
 ## [0.9.18] - 2026-10-24
 
 ### Added — 变量监控表格化：变量名 | 类型 | 值 | 地址（Keil Watch 同款布局）
