@@ -60,6 +60,7 @@ import { AutoCmakeFlashSettings, loadSettings, onSettingsChange } from './config
 import { SidebarProvider, flashStatusText, verifyText } from './ui/sidebar';
 import { StatusBar } from './ui/statusBar';
 import { IocLauncherEditorProvider } from './ui/iocLauncherEditor';
+import { ConfigPanel } from './ui/configPanel';
 import {
   chooseMcuDialog,
   confirmCleanDialog,
@@ -138,6 +139,8 @@ function init(context: vscode.ExtensionContext): void {
       refresh();
     }),
   );
+
+  const configPanel = new ConfigPanel(log);
 
   // ---------------- 基础工具 ----------------
 
@@ -1806,98 +1809,8 @@ function init(context: vscode.ExtensionContext): void {
     refresh();
   });
 
-  register('autoCmakeFlash.openSettings', async () => {
-    // 独立配置对话框（不走 VS Code 设置页，配置写入工作区设置）
-    type SettingItem = {
-      key: string;
-      label: string;
-      kind: 'string' | 'number' | 'bool' | 'enum';
-      options?: string[];
-      hint?: string;
-    };
-    const items: SettingItem[] = [
-      { key: 'buildDir', label: '构建目录', kind: 'string', hint: '填 build 时自动按类型分 Debug/Release 子目录，也支持 ${buildType}' },
-      { key: 'debugEngine', label: '调试引擎', kind: 'enum', options: ['cortex-debug', 'probe-rs'], hint: 'probe-rs 支持运行中旁路直读寄存器' },
-      { key: 'probeRsChip', label: 'probe-rs 芯片名', kind: 'string', hint: '如 STM32F103C8，留空按识别型号自动推导' },
-      { key: 'buildType', label: '构建类型', kind: 'enum', options: ['Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel'] },
-      { key: 'generator', label: 'CMake 生成器', kind: 'string', hint: '一般保持 Ninja' },
-      { key: 'cmakeToolchainFile', label: 'CMake 工具链文件', kind: 'string', hint: '留空 = 自动识别工程内 cmake/*.cmake' },
-      { key: 'cmakeExtraArgs', label: 'CMake 额外参数', kind: 'string', hint: '空格分隔，可留空' },
-      { key: 'downloadInterface', label: '烧录接口', kind: 'enum', options: ['SWD', 'JTAG'] },
-      { key: 'downloadSpeedKhz', label: '连接速度 (kHz)', kind: 'number' },
-      { key: 'resetAfterFlash', label: '烧录后复位', kind: 'enum', options: ['hardware', 'software', 'none'] },
-      { key: 'binFlashAddress', label: 'BIN 烧录地址', kind: 'string', hint: '如 0x08010000，烧 ELF/HEX 时留空' },
-      { key: 'gdbPath', label: 'ARM GDB 路径', kind: 'string', hint: '调试用，留空 = 自动探测' },
-      { key: 'gdbServerPath', label: 'ST-LINK GDB Server 路径', kind: 'string', hint: '调试用，留空 = 自动探测' },
-      { key: 'cubemxPath', label: 'STM32CubeMX 路径', kind: 'string', hint: 'STM32CubeMX.exe 完整路径，打开 .ioc 用，留空 = 自动探测' },
-      { key: 'svdFile', label: 'SVD 文件路径', kind: 'string', hint: '调试时显示外设寄存器视图（可选）' },
-      { key: 'verboseLogging', label: '详细日志', kind: 'bool' },
-      { key: 'buildTimeoutSec', label: '编译超时（秒）', kind: 'number' },
-      { key: 'flashTimeoutSec', label: '烧录超时（秒）', kind: 'number' },
-      { key: 'cmakePath', label: 'CMake 路径', kind: 'string', hint: '留空 = 自动探测' },
-      { key: 'ninjaPath', label: 'Ninja 路径', kind: 'string', hint: '留空 = 自动探测' },
-      { key: 'armToolchainPath', label: 'ARM 工具链路径', kind: 'string', hint: '留空 = 自动探测' },
-      { key: 'programmerCliPath', label: 'STM32CubeProgrammer CLI 路径', kind: 'string', hint: '留空 = 自动探测' },
-    ];
-    while (true) {
-      const s = loadSettings();
-      const sVals = s as unknown as Record<string, string | number | boolean | undefined>;
-      const picks: { label: string; description?: string; done?: boolean; it?: SettingItem }[] = [
-        { label: '$(check) 完成', done: true },
-        ...items.map((it) => {
-          let value = sVals[it.key];
-          if (typeof value === 'boolean') {
-            value = value ? '开启' : '关闭';
-          } else if (!value) {
-            value = '(默认/自动)';
-          }
-          return {
-            label: `${it.label}: ${value}`,
-            description: it.kind === 'enum' ? '点击选择' : '点击修改',
-            it,
-          };
-        }),
-      ];
-      const sel = await vscode.window.showQuickPick(picks, {
-        placeHolder: 'Auto CMake Flash 配置（保存到工作区，仅当前工程生效）',
-      });
-      if (!sel || sel.done || !sel.it) {
-        break;
-      }
-      const it = sel.it;
-      let value: string | number | boolean | undefined;
-      if (it.kind === 'enum') {
-        value = await vscode.window.showQuickPick(it.options ?? [], { placeHolder: it.label });
-      } else if (it.kind === 'bool') {
-        value = !sVals[it.key];
-      } else {
-        const cur = sVals[it.key];
-        const input = await vscode.window.showInputBox({
-          placeHolder: it.label,
-          value: typeof cur === 'number' ? String(cur) : typeof cur === 'string' ? cur : '',
-          prompt: it.hint ?? '',
-          validateInput:
-            it.kind === 'number'
-              ? (v) => (v && !/^\d+$/.test(v) ? '请输入正整数' : undefined)
-              : undefined,
-        });
-        if (input === undefined) {
-          continue;
-        }
-        value = it.kind === 'number' ? Math.round(Number(input)) : input;
-      }
-      if (value === undefined) {
-        continue;
-      }
-      const folder = vscode.workspace.workspaceFolders?.[0];
-      await vscode.workspace
-        .getConfiguration('autoCmakeFlash')
-        .update(
-          it.key,
-          value === '' ? undefined : value,
-          folder ? vscode.ConfigurationTarget.WorkspaceFolder : vscode.ConfigurationTarget.Global,
-        );
-    }
+  register('autoCmakeFlash.openSettings', () => {
+    configPanel.show();
   });
 
   register('autoCmakeFlash.showWarnings', async () => {
