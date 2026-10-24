@@ -486,7 +486,7 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       <script>
         const vscode = acquireVsCodeApi();
         const state = { svd: false, periphs: [], active: null, regs: [], sel: null,
-                        vals: {}, q: '', engine: undefined, session: false, frowFields: [] };
+                        vals: {}, q: '', engine: undefined, session: false, frowFields: [], intervalMs: 200, paused: false };
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         function post(m) { vscode.postMessage(m); }
