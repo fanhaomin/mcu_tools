@@ -471,22 +471,14 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       .fin:focus { outline: none; border-color: var(--ac); }
       .empty { padding: 30px 12px; text-align: center; color: var(--vscode-descriptionForeground); line-height: 1.7; }
     </style></head><body>
-      <div id="top">
-        <div class="row">
-          <input id="q" type="text" placeholder="过滤外设 / 寄存器…">
-          <button id="mon" class="ghost" style="display:none" title="cortex-debug 引擎专用：每秒短暂暂停目标采样一次">⏸ 运行监视</button>
-          <button id="rf" title="立即刷新">⟳</button>
-        </div>
-        <div id="stat"><span class="dot" id="dot"></span><span id="statTx">加载中…</span></div>
-      </div>
-      <div id="main">
+
         <div class="pane" id="left"></div>
         <div class="pane" id="right"></div>
       </div>
       <script>
         const vscode = acquireVsCodeApi();
         const state = { svd: false, periphs: [], active: null, regs: [], sel: null,
-                        vals: {}, q: '', engine: undefined, session: false, monitor: false, frowFields: [] };
+                        vals: {}, q: '', engine: undefined, session: false, frowFields: [] };
         const $ = (id) => document.getElementById(id);
         const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         function post(m) { vscode.postMessage(m); }
@@ -494,7 +486,7 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
         function render() {
           const q = state.q.toUpperCase();
           const left = $('left');
-          if (!state.svd) { left.innerHTML = '<div class="empty">' + esc($('statTx').textContent) + '</div>'; return; }
+          if (!state.svd) { left.innerHTML = '<div class="empty">等待调试会话…</div>'; return; }
           // 左栏以寄存器列表为主：外设用下拉框选择，列表占满剩余空间
           const regs = state.regs.filter(r => !q || r.name.toUpperCase().includes(q));
           let h = '<div class="cap">外设</div>';
@@ -652,7 +644,7 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
           // 避免标志时序问题导致面板空转不读
           if (!state.active || state.regs.length === 0) return;
           const items = state.regs.map(r => ({ key: state.active + '.' + r.name, addr: r.address, size: r.size }));
-          post({ cmd: 'read', items: items });
+          post({ cmd: 'read', items: items, monitor: true });
         }
 
         window.addEventListener('message', (e) => {
@@ -660,8 +652,6 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
           if (m.cmd === 'svd') {
             state.svd = !!m.file;
             state.periphs = m.peripherals || [];
-            $('statTx').textContent = (m.file ? (m.deviceName || '') + ' · ' : '') + m.status;
-            $('dot').className = 'dot' + (m.file ? ' ok' : ' err');
             if (state.periphs.length && !state.active) {
               const pref = state.periphs.find(p => p.name.indexOf('GPIO') === 0) || state.periphs[0];
               state.active = pref.name;
@@ -675,30 +665,13 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
           } else if (m.cmd === 'values') {
             state.vals = m.values || {};
             updateVals(); // 只更新文字节点，不重建左栏（否则下拉框点开就被销毁）
-            const dot = $('dot');
-            if (state.engine === 'probe-rs' && state.session) {
-              dot.className = 'dot ok';
-              $('statTx').textContent = '旁路直读中 · 零停机 · 200ms';
-            }
           } else if (m.cmd === 'session') {
             state.session = m.active; state.engine = m.engine;
-            $('mon').style.display = state.engine === 'probe-rs' ? 'none' : '';
-            if (!m.active) {
-              $('statTx').textContent = '未在调试会话中（编译并调试后自动加载 SVD）';
-              $('dot').className = 'dot';
-              $('mon').style.display = '';
-            }
-          } else if (m.cmd === 'written') { tick(); }
+            if (!m.active) { state.vals = {}; updateVals(); }
+} else if (m.cmd === 'written') { tick(); }
         });
 
-        $('q').addEventListener('input', render);
-        $('rf').addEventListener('click', tick);
-        $('mon').addEventListener('click', () => {
-          state.monitor = !state.monitor;
-          $('mon').classList.toggle('ac', state.monitor);
-          tick();
-        });
-        state.timer = setInterval(tick, 200);
+
 
         document.addEventListener('keydown', (ev) => {
           if (ev.key !== 'Enter') return;
@@ -709,6 +682,8 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
             big.blur();
           }
         });
+
+        state.timer = setInterval(tick, 200);
 
         post({ cmd: 'ready' });
       </script>

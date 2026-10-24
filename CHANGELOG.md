@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.7] - 2026-10-24
+
+### Changed — 外设面板移除顶部工具条
+- 移除过滤框 / 状态行 / 刷新与运行监视按钮：面板直接从寄存器列表开始，始终 200ms 自动刷新。
+- cortex-debug 引擎的微停机采样改为自动启用（仅在目标运行中且读取失败时短暂暂停采样，probe-rs 引擎本就是旁路直读不受影响）。
+- 会话断开时自动清空旧值显示。
+
 ## [0.8.6] - 2026-10-24
 
 ### Added — 状态栏构建类型选择按钮
