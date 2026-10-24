@@ -265,7 +265,7 @@ class WatchViewProvider {
         };
         await Promise.all(this.entries.filter((e) => e.addr !== undefined || e.memRef).map((e) => readOne(e)));
         // 2. 未解析的：优先查 ELF 符号表（离线、零停顿、双引擎通用）
-        const unresolved = this.entries.filter((e) => e.addr === undefined);
+        const unresolved = this.entries.filter((e) => e.addr === undefined && !e.memRef);
         if (unresolved.length > 0) {
             const sym = await this.ensureSymbols();
             if (sym.size === 0) {
@@ -316,7 +316,7 @@ class WatchViewProvider {
                 }));
             }
             // probe-rs 运行中 evaluate 必然失败：2 秒后微停机一次完成解析
-            const stillUnresolved = this.entries.filter((e) => e.addr === undefined);
+            const stillUnresolved = this.entries.filter((e) => e.addr === undefined && !e.memRef);
             if (stillUnresolved.length > 0 && Date.now() - this.lastProbeSample > 2_000) {
                 this.lastProbeSample = Date.now();
                 this.deps.log('变量监控: 运行中无法解析符号，微停机一次完成解析（之后纯旁路读取）');
@@ -343,13 +343,27 @@ class WatchViewProvider {
             (nonIntrusive && unresolved.some((e) => e.addr === undefined && this.readFailedRecently))) {
             await (0, dapHelpers_1.sampleWhileRunning)(s, this.deps.log, async () => {
                 await Promise.all(this.entries.map(async (e) => {
-                    if (e.addr === undefined) {
-                        await this.resolveEntry(s, e, true);
-                    }
-                    if (e.addr === undefined) {
+                    const ref = e.memRef ?? (e.addr !== undefined ? '0x' + e.addr.toString(16) : undefined);
+                    if (!ref) {
                         return;
                     }
-                    const buf = await (0, dapHelpers_1.readBlock)(s, e.addr, e.bytes);
+                    let buf;
+                    try {
+                        const r = (await s.customRequest('readMemory', {
+                            memoryReference: ref,
+                            count: e.bytes,
+                        }));
+                        const b = Buffer.from(r?.data ?? '', 'base64');
+                        if (b.length > 0) {
+                            buf = b;
+                        }
+                    }
+                    catch {
+                        // 读取失败
+                    }
+                    if (!buf) {
+                        return;
+                    }
                     if (buf) {
                         results[e.expr] = {
                             hex: (0, dapHelpers_2.toHexLE)(buf, e.bytes * 8),
@@ -425,7 +439,7 @@ class WatchViewProvider {
             const hex = v.ok ? v.hex : (v.hex || '…');
             return '<div class="item" data-e="' + esc(e.expr) + '">' +
               '<div><div class="name">' + esc(e.expr) + '</div>' +
-              '<div class="meta">' + (e.addr !== undefined ? '0x' + e.addr.toString(16).toUpperCase() + ' · ' + e.bytes + 'B' : (e.resolveFailed ? '无法解析 — 请改用 0x 地址' : '解析中…')) + '</div>' +
+              '<div class="meta">' + (e.addr !== undefined ? '0x' + e.addr.toString(16).toUpperCase() + ' · ' + e.bytes + 'B' : e.memRef ? '已捕获 · ' + e.bytes + 'B' : (e.resolveFailed ? '无法解析 — 请改用 0x 地址' : '解析中… · ' + e.bytes + 'B')) + '</div>' +
               '<span class="val' + (v.ok ? '' : ' stale') + '">' + esc(hex) + '</span>' +
               '<span class="del" title="移除">✕</span></div>';
           }).join('');
