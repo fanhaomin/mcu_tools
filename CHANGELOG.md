@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-10-24
+
+### Fixed — 默认构建目录两处关键修正
+- settings.ts 默认值曾被转义问题截断为 'cmake-build-'（无类型段）：已恢复完整 'cmake-build-'。
+- 小写化正则要求 cmake-build- 前必须有路径分隔符，相对路径默认值不匹配导致 cmake-build-Debug 保持大写：分隔符改为可选，相对/绝对路径均正确小写。
+- 已用脚本（scripts/verify-builddir.js）固化验证：Debug → cmake-build-debug、Release → cmake-build-release。
+
 ## [0.8.0] - 2026-10-24
 
 ### Changed — 构建目录与产物命名全面对齐 CLion 风格（去掉 auto）

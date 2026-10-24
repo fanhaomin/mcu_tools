@@ -223,7 +223,7 @@ function init(context) {
         // （build/Debug、build/Release），与 CLion CMakePresets 的 binaryDir 约定一致。
         let resolved = bd.split('${buildType}').join(settings.buildType);
         // CLion 命名统一：cmake-build-<Type> 的类型段统一小写（cmake-build-debug / release）
-        resolved = resolved.replace(/([\\/])cmake-build-([^\\/]+)$/i, (m0, sep, t) => sep + 'cmake-build-' + t.toLowerCase());
+        resolved = resolved.replace(/(^|[\\/])cmake-build-([^\\/]+)$/i, (m0, sep, t) => (sep || '') + 'cmake-build-' + t.toLowerCase());
         if (!path.isAbsolute(resolved) && /(^|[\\/])build([\\/])?$/i.test(resolved)) {
             resolved = `${resolved.replace(/[\\/]$/, '')}/${settings.buildType}`;
         }

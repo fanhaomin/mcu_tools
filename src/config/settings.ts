@@ -50,7 +50,7 @@ export function loadSettings(): AutoCmakeFlashSettings {
   const iface = cfg.get<string>('downloadInterface', 'SWD');
   const reset = cfg.get<string>('resetAfterFlash', 'hardware');
   return {
-    buildDir: cfg.get<string>('buildDir', 'cmake-build-') || 'cmake-build-',
+    buildDir: cfg.get<string>('buildDir', 'cmake-build-${buildType}') || 'cmake-build-${buildType}',
     buildType: (validTypes as string[]).includes(buildType)
       ? (buildType as AutoCmakeFlashSettings['buildType'])
       : 'Debug',
