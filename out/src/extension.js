@@ -66,6 +66,8 @@ const sidebar_1 = require("./ui/sidebar");
 const statusBar_1 = require("./ui/statusBar");
 const iocLauncherEditor_1 = require("./ui/iocLauncherEditor");
 const configPanel_1 = require("./ui/configPanel");
+const watchView_1 = require("./ui/watchView");
+const memView_1 = require("./ui/memView");
 const confirmation_1 = require("./ui/confirmation");
 function activate(context) {
     try {
@@ -1100,6 +1102,21 @@ function init(context) {
         log,
     });
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(periphView_1.PeriphViewProvider.viewType, periph, { webviewOptions: { retainContextWhenHidden: true } }));
+    const watch = new watchView_1.WatchViewProvider({
+        getSession: () => engineSession,
+        log,
+        memento: context.workspaceState,
+    });
+    const mem = new memView_1.MemViewProvider({
+        getSession: () => engineSession,
+        log,
+        memento: context.workspaceState,
+    });
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider(watchView_1.WatchViewProvider.viewType, watch, {
+        webviewOptions: { retainContextWhenHidden: true },
+    }), vscode.window.registerWebviewViewProvider(memView_1.MemViewProvider.viewType, mem, {
+        webviewOptions: { retainContextWhenHidden: true },
+    }));
     const isEngineSession = (s) => s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
     if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {
         engineSession = vscode.debug.activeDebugSession;

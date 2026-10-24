@@ -61,6 +61,8 @@ import { SidebarProvider, flashStatusText, verifyText } from './ui/sidebar';
 import { StatusBar } from './ui/statusBar';
 import { IocLauncherEditorProvider } from './ui/iocLauncherEditor';
 import { ConfigPanel } from './ui/configPanel';
+import { WatchViewProvider } from './ui/watchView';
+import { MemViewProvider } from './ui/memView';
 import {
   chooseMcuDialog,
   confirmCleanDialog,
@@ -1357,6 +1359,25 @@ function init(context: vscode.ExtensionContext): void {
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
   );
+  const watch = new WatchViewProvider({
+    getSession: () => engineSession,
+    log,
+    memento: context.workspaceState,
+  });
+  const mem = new MemViewProvider({
+    getSession: () => engineSession,
+    log,
+    memento: context.workspaceState,
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(WatchViewProvider.viewType, watch, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerWebviewViewProvider(MemViewProvider.viewType, mem, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+  );
+
   const isEngineSession = (s: vscode.DebugSession): boolean =>
     s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
   if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {
