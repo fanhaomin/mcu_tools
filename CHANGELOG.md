@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.127] - 2026-10-25
+
+### Changed — 更换扁平风格方形芯片图标
+- 扩展图标（活动栏/底栏容器 + 扩展列表大图标）换为用户提供的扁平风格方形 IC 芯片图；1254×1254 原图高质量缩至 256×256（约 62KB），避免 1MB 原图进包。
+
 ## [0.9.126] - 2026-10-25
 
 ### Changed — README 重写为纯使用说明
