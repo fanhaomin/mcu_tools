@@ -8,3 +8,4 @@ build.ps1
 .gitignore
 tsconfig.json
 **/*.vsix
+CHANGELOG.md
