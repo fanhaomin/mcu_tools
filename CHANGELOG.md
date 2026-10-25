@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.128] - 2026-10-25
+
+### Changed — 图标换回 icons8 彩色芯片（弃灰款扁平图）
+- 灰色扁平方形 IC 图整体感偏暗，换回 icons8 彩色芯片图标（64×64 原生尺寸，绿色调，三处引用不变）。
+
 ## [0.9.127] - 2026-10-25
 
 ### Changed — 更换扁平风格方形芯片图标
