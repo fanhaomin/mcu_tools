@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.125] - 2026-10-25
+
+### Fixed — 扩展列表大图标缺失（默认占位图）
+- package.json 顶层补 `"icon"` 字段指向芯片 PNG：扩展面板/列表里的大图标原来一直是 VS Code 默认占位图（只配了视图容器小图标，没配扩展自身图标）。
+
 ## [0.9.124] - 2026-10-25
 
 ### Changed — 扩展描述重写（一句话结构化）
