@@ -1,8 +1,8 @@
 {
   "name": "auto-cmake-flash",
-  "displayName": "Auto CMake Flash (STM32)",
-  "description": "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录与校验一体化工具（第一版仅支持 STM32）",
-  "version": "0.9.48",
+  "displayName": "Embedded Debug (STM32)",
+  "description": "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录、在线调试与实时监控一体化插件（原 Auto CMake Flash；第一版仅支持 STM32）",
+  "version": "0.9.105",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
@@ -30,14 +30,14 @@
       "activitybar": [
         {
           "id": "auto-cmake-flash",
-          "title": "Auto CMake Flash",
+          "title": "Embedded Debug",
           "icon": "resources/auto-cmake-flash.svg"
         }
       ],
       "panel": [
         {
-          "id": "auto-cmake-flash-debug",
-          "title": "ACF 调试",
+          "id": "ed-debug-panel",
+          "title": "调试器",
           "icon": "resources/auto-cmake-flash.svg"
         }
       ]
@@ -49,7 +49,7 @@
           "name": "工程与环境"
         }
       ],
-      "auto-cmake-flash-debug": [
+      "ed-debug-panel": [
         {
           "id": "autoCmakeFlash.periph",
           "name": "外设寄存器",
@@ -69,13 +69,23 @@
           "id": "autoCmakeFlash.memview",
           "name": "内存视图",
           "type": "webview"
+        },
+        {
+          "id": "autoCmakeFlash.callstack",
+          "name": "调用栈",
+          "type": "webview"
+        },
+        {
+          "id": "autoCmakeFlash.disasm",
+          "name": "反汇编",
+          "type": "webview"
         }
       ]
     },
     "customEditors": [
       {
         "viewType": "autoCmakeFlash.iocLauncher",
-        "displayName": "STM32CubeMX (Auto CMake Flash)",
+        "displayName": "STM32CubeMX (Embedded Debug)",
         "selector": [
           {
             "filenamePattern": "*.ioc"
@@ -86,108 +96,113 @@
     ],
     "commands": [
       {
+        "command": "autoCmakeFlash.showDisasmHere",
+        "title": "Embedded Debug: 在反汇编中显示此行",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "autoCmakeFlash.chooseProject",
-        "title": "Auto CMake Flash: 选择要编译/烧录的工程",
+        "title": "Embedded Debug: 选择要编译/烧录的工程",
         "icon": "$(folder)"
       },
       {
         "command": "autoCmakeFlash.scanProject",
-        "title": "Auto CMake Flash: 扫描工程与环境",
+        "title": "Embedded Debug: 扫描工程与环境",
         "icon": "$(refresh)"
       },
       {
         "command": "autoCmakeFlash.detectEnvironment",
-        "title": "Auto CMake Flash: 检测开发环境",
+        "title": "Embedded Debug: 检测开发环境",
         "icon": "$(tools)"
       },
       {
         "command": "autoCmakeFlash.detectStLink",
-        "title": "Auto CMake Flash: 检测 ST-LINK 连接",
+        "title": "Embedded Debug: 检测 ST-LINK 连接",
         "icon": "$(plug)"
       },
       {
         "command": "autoCmakeFlash.configureCMake",
-        "title": "Auto CMake Flash: 配置 CMake",
+        "title": "Embedded Debug: 配置 CMake",
         "icon": "$(settings-gear)"
       },
       {
         "command": "autoCmakeFlash.build",
-        "title": "Auto CMake Flash: 编译工程",
+        "title": "Embedded Debug: 编译工程",
         "icon": "$(zap)"
       },
       {
         "command": "autoCmakeFlash.rebuild",
-        "title": "Auto CMake Flash: 重新配置并编译",
+        "title": "Embedded Debug: 重新配置并编译",
         "icon": "$(debug-restart)"
       },
       {
         "command": "autoCmakeFlash.buildAndFlash",
-        "title": "Auto CMake Flash: 编译并烧录",
+        "title": "Embedded Debug: 编译并烧录",
         "icon": "$(rocket)"
       },
       {
         "command": "autoCmakeFlash.debug",
-        "title": "Auto CMake Flash: 编译并调试",
+        "title": "Embedded Debug: 编译并调试",
         "icon": "$(debug-alt)"
       },
       {
         "command": "autoCmakeFlash.debugAttach",
-        "title": "Auto CMake Flash: 附加调试运行中的目标",
+        "title": "Embedded Debug: 附加调试运行中的目标",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "autoCmakeFlash.openIoc",
-        "title": "Auto CMake Flash: 在 STM32CubeMX 中打开 .ioc",
+        "title": "Embedded Debug: 在 STM32CubeMX 中打开 .ioc",
         "icon": "$(file-text)"
       },
       {
         "command": "autoCmakeFlash.flashExisting",
-        "title": "Auto CMake Flash: 烧录现有固件",
+        "title": "Embedded Debug: 烧录现有固件",
         "icon": "$(rocket)"
       },
       {
         "command": "autoCmakeFlash.clean",
-        "title": "Auto CMake Flash: 清理插件构建目录",
+        "title": "Embedded Debug: 清理插件构建目录",
         "icon": "$(trash)"
       },
       {
         "command": "autoCmakeFlash.openBuildDir",
-        "title": "Auto CMake Flash: 打开构建目录",
+        "title": "Embedded Debug: 打开构建目录",
         "icon": "$(folder-opened)"
       },
       {
         "command": "autoCmakeFlash.showArtifacts",
-        "title": "Auto CMake Flash: 显示构建产物信息",
+        "title": "Embedded Debug: 显示构建产物信息",
         "icon": "$(file-binary)"
       },
       {
         "command": "autoCmakeFlash.revealElf",
-        "title": "Auto CMake Flash: 定位 ELF 文件",
+        "title": "Embedded Debug: 定位 ELF 文件",
         "icon": "$(search)"
       },
       {
         "command": "autoCmakeFlash.chooseMcu",
-        "title": "Auto CMake Flash: 手动选择芯片型号",
+        "title": "Embedded Debug: 手动选择芯片型号",
         "icon": "$(chip)"
       },
       {
         "command": "autoCmakeFlash.showLogs",
-        "title": "Auto CMake Flash: 查看日志",
+        "title": "Embedded Debug: 查看日志",
         "icon": "$(output)"
       },
       {
         "command": "autoCmakeFlash.openSettings",
-        "title": "Auto CMake Flash: 打开设置",
+        "title": "Embedded Debug: 打开设置",
         "icon": "$(gear)"
       },
       {
         "command": "autoCmakeFlash.addWatchFromEditor",
-        "title": "Auto CMake Flash: 添加到变量监控",
+        "title": "Embedded Debug: 添加到变量监控",
         "icon": "$(add)"
       },
       {
         "command": "autoCmakeFlash.browseWatchVars",
-        "title": "Auto CMake Flash: 浏览 ELF 变量并添加监控",
+        "title": "Embedded Debug: 浏览 ELF 变量并添加监控",
         "icon": "$(symbol-variable)"
       }
     ],
@@ -200,6 +215,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "autoCmakeFlash.showDisasmHere",
+          "when": "editorTextFocus",
+          "group": "navigation@9"
+        },
         {
           "command": "autoCmakeFlash.addWatchFromEditor",
           "when": "editorTextFocus",
@@ -302,7 +322,7 @@
       ]
     },
     "configuration": {
-      "title": "Auto CMake Flash",
+      "title": "Embedded Debug",
       "properties": {
         "autoCmakeFlash.buildType": {
           "type": "string",
@@ -361,33 +381,11 @@
           "default": "",
           "description": "BIN 烧录基地址（如 0x08010000；烧 ELF/HEX 留空）"
         },
-        "autoCmakeFlash.debugEngine": {
-          "type": "string",
-          "scope": "resource",
-          "default": "cortex-debug",
-          "enum": [
-            "cortex-debug",
-            "probe-rs"
-          ],
-          "description": "调试引擎：probe-rs 支持运行中旁路直读"
-        },
         "autoCmakeFlash.probeRsChip": {
           "type": "string",
           "scope": "resource",
           "default": "",
           "description": "probe-rs 芯片名（如 STM32F103C8）；留空自动推导"
-        },
-        "autoCmakeFlash.gdbPath": {
-          "type": "string",
-          "scope": "resource",
-          "default": "",
-          "description": "arm-none-eabi-gdb 路径；留空自动探测"
-        },
-        "autoCmakeFlash.gdbServerPath": {
-          "type": "string",
-          "scope": "resource",
-          "default": "",
-          "description": "ST-LINK_gdbserver 路径；留空自动探测"
         },
         "autoCmakeFlash.svdFile": {
           "type": "string",
@@ -430,6 +428,12 @@
           "scope": "resource",
           "default": false,
           "description": "输出详细日志"
+        },
+        "autoCmakeFlash.showCompiledMark": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": true,
+          "description": "编辑器淡绿底标注已编译进固件的源码行（不开调试也可用）"
         },
         "autoCmakeFlash.buildTimeoutSec": {
           "type": "number",

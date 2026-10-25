@@ -28,7 +28,7 @@ export type TypeDesc =
       /** [名称, 值] */
       enumerators: [string, number][];
     }
-  | { cat: 'ptr'; label: string; bytes: number }
+  | { cat: 'ptr'; label: string; bytes: number; /** 被指类型（void* 无）；监控里展开解引用用 */ elem?: TypeDesc }
   | { cat: 'array'; label: string; bytes: number; count: number; elem: TypeDesc; /** 各维长度（>1 维时保留，供逐层展开） */ dims?: number[] }
   | {
       cat: 'struct';
@@ -68,6 +68,9 @@ export function isExpandable(t: TypeDesc | undefined): boolean {
   }
   if (t.cat === 'struct') {
     return t.members.length > 0;
+  }
+  if (t.cat === 'ptr') {
+    return !!t.elem && t.elem.bytes > 0;
   }
   return false;
 }
@@ -412,7 +415,10 @@ function baseScalar(encoding: string, bytes: number, name: string): TypeDesc {
   const e = /char/i.test(encoding)
     ? (/unsigned/i.test(encoding) ? 'unsigned' : 'signed')
     : encoding;
-  const label =
+  // 源码里写的是 char（ARM 上默认无符号，DWARF 标 DW_ATE_unsigned_char）——
+  // 标签如实显示 char，数值解码仍按无符号 8 位走
+  const isPlainChar = name === 'char';
+  const label = isPlainChar && bytes === 1 ? 'char' :
     (e === 'unsigned' && bytes === 1) ? 'uint8_t' :
     (e === 'unsigned' && bytes === 2) ? 'uint16_t' :
     (e === 'unsigned' && bytes === 4) ? 'uint32_t' :
@@ -522,8 +528,9 @@ function resolveType(
       case 'DW_TAG_pointer_type': {
         const target = attrRef(die.attrs.get('DW_AT_type') ?? '');
         const bytes = attrInt(die.attrs.get('DW_AT_byte_size') ?? '') ?? 4;
-        const tl = target === undefined ? 'void' : quickLabel(dies, target, new Set(), 0);
-        return { cat: 'ptr', label: `${tl} *`, bytes: Math.max(1, bytes) };
+        const elem = target === undefined ? undefined : resolveType(dies, target, seen, depth + 1);
+        const tl = elem ? elem.label : (target === undefined ? 'void' : quickLabel(dies, target, new Set(), 0));
+        return { cat: 'ptr', label: `${tl} *`, bytes: Math.max(1, bytes), elem };
       }
       case 'DW_TAG_array_type': {
         const elem = resolveType(dies, attrRef(die.attrs.get('DW_AT_type') ?? ''), seen, depth + 1);
@@ -818,6 +825,29 @@ export function decodeByType(buf: Buffer | undefined, t: TypeDesc | undefined): 
   }
   if (t.cat === 'array') {
     const shape = t.dims && t.dims.length > 1 ? t.dims.join('×') : `${t.count > 0 ? t.count : '?'}`;
+    // char 数组按字符串显示（到 NUL 截止，不可打印字节转义）
+    const elem = t.elem as { cat?: string; bytes?: number; label?: string } | undefined;
+    if (elem && elem.cat === 'scalar' && elem.bytes === 1 && /char/i.test(elem.label ?? '')) {
+      const cap = Math.min(buf.length, t.count > 0 ? t.count : buf.length, 128);
+      let out = '';
+      let end = cap;
+      for (let i = 0; i < cap; i++) {
+        const c = buf[i];
+        if (c === 0) {
+          end = i;
+          break;
+        }
+        if (c === 0x5c) out += '\\\\';
+        else if (c === 0x22) out += '\\"';
+        else if (c === 0x0a) out += '\\n';
+        else if (c === 0x0d) out += '\\r';
+        else if (c === 0x09) out += '\\t';
+        else if (c >= 0x20 && c < 0x7f) out += String.fromCharCode(c);
+        else out += `\\x${c.toString(16).padStart(2, '0')}`;
+      }
+      const truncated = end >= 128 && cap >= 128 ? '…' : '';
+      return { value: `"${out}${truncated}"`, hex: '' };
+    }
     return { value: `[${shape}${t.dims && t.dims.length > 1 ? '' : ' 项'}]`, hex: '' };
   }
   if (t.cat === 'struct') {

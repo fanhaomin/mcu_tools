@@ -1,5 +1,5 @@
 /**
- * Auto CMake Flash — 共享类型定义。
+ * Embedded Debug — 共享类型定义。
  *
  * 注意：本文件不得 import 'vscode'，以便核心逻辑可在纯 Node 环境下单元测试。
  */
@@ -107,9 +107,7 @@ export type ToolName =
   | 'armGpp'
   | 'objcopy'
   | 'size'
-  | 'programmerCli'
-  | 'armGdb'
-  | 'stlinkGdbServer';
+  | 'programmerCli';
 
 /** 核心组件：编译与烧录必需，任一缺失即视为环境不完整 */
 export const ALL_TOOL_NAMES: ToolName[] = [
@@ -122,13 +120,6 @@ export const ALL_TOOL_NAMES: ToolName[] = [
   'programmerCli',
 ];
 
-/**
- * 调试组件：可选，不参与 complete/missing 判定。
- * 缺失只影响调试功能（随 STM32CubeCLT 安装：gdb 在 GNU-tools-for-STM32，
- * GDB Server 在 STM32CubeProgrammer/bin）。
- */
-export const DEBUG_TOOL_NAMES: ToolName[] = ['armGdb', 'stlinkGdbServer'];
-
 export const TOOL_LABELS: Record<ToolName, string> = {
   cmake: 'CMake',
   ninja: 'Ninja',
@@ -137,8 +128,6 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   objcopy: 'arm-none-eabi-objcopy',
   size: 'arm-none-eabi-size',
   programmerCli: 'STM32CubeProgrammer CLI',
-  armGdb: 'ARM GDB (arm-none-eabi-gdb)',
-  stlinkGdbServer: 'ST-LINK GDB Server',
 };
 
 export interface ToolInfo {

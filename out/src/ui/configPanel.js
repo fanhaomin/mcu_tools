@@ -54,7 +54,7 @@ class ConfigPanel {
             this.postSettings();
             return;
         }
-        this.panel = vscode.window.createWebviewPanel('autoCmakeFlash.config', 'ACF 配置', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false }, { enableScripts: true, retainContextWhenHidden: true });
+        this.panel = vscode.window.createWebviewPanel('autoCmakeFlash.config', 'Embedded Debug 配置', { viewColumn: vscode.ViewColumn.Active, preserveFocus: false }, { enableScripts: true, retainContextWhenHidden: true });
         this.panel.webview.html = this.html();
         this.panel.webview.onDidReceiveMessage((m) => void this.onMessage(m));
         this.panel.onDidDispose(() => {
@@ -87,11 +87,9 @@ class ConfigPanel {
                 title: '调试',
                 icon: '🐛',
                 fields: [
-                    { key: 'debugEngine', label: '调试引擎', type: 'enum', options: ['cortex-debug', 'probe-rs'], hint: 'probe-rs 支持运行中旁路直读寄存器' },
                     { key: 'probeRsChip', label: 'probe-rs 芯片名', type: 'text', hint: '如 STM32F103C8，留空按识别型号自动推导' },
-                    { key: 'gdbPath', label: 'ARM GDB 路径', type: 'text', hint: '留空 = 自动探测' },
-                    { key: 'gdbServerPath', label: 'ST-LINK GDB Server 路径', type: 'text', hint: '留空 = 自动探测' },
                     { key: 'svdFile', label: 'SVD 文件路径', type: 'text', hint: '留空 = 按芯片型号自动定位' },
+                    { key: 'showCompiledMark', label: '已编译行标注', type: 'bool', hint: '编辑器淡绿底标注已编译进固件的源码行（反汇编数据驱动，不开调试也可用）' },
                 ],
             },
             {
@@ -214,7 +212,7 @@ class ConfigPanel {
         background: color-mix(in srgb, #f14c4c 12%, var(--vscode-editor-background)); }
     </style></head><body>
       <div id="bar">
-        <h2>Auto CMake Flash 配置</h2>
+        <h2>Embedded Debug 配置</h2>
         <span class="hint">保存到当前工程的工作区设置（.vscode/settings.json）</span>
         <button id="save">保存</button>
         <button id="reset" class="ghost" title="把所有项恢复为默认（清空自定义值）">全部恢复默认</button>

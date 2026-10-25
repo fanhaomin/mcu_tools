@@ -41,7 +41,7 @@ export async function chooseMcuDialog(
   });
 
   const pick = await vscode.window.showQuickPick(items, {
-    title: 'Auto CMake Flash — 选择芯片型号',
+    title: 'Embedded Debug — 选择芯片型号',
     placeHolder: '当前证据不足以自动确定芯片型号，请选择或输入',
     ignoreFocusOut: true,
   });
@@ -83,11 +83,11 @@ export async function inputBinAddressDialog(current?: string): Promise<string | 
 /** 构建目录复用确认（目录非空且非插件创建时） */
 export async function confirmReuseBuildDirDialog(dir: string): Promise<boolean> {
   const choice = await vscode.window.showWarningMessage(
-    'Auto CMake Flash — 使用已存在的构建目录？',
+    'Embedded Debug — 使用已存在的构建目录？',
     {
       modal: true,
       detail:
-        `目录 ${dir} 已存在且不是 Auto CMake Flash 创建的。\n` +
+        `目录 ${dir} 已存在且不是 Embedded Debug 创建的。\n` +
         '插件不会删除其中内容，但会在其中执行 CMake 配置。\n建议：如这是其他工具的构建目录，请改用独立目录（设置 autoCmakeFlash.buildDir）。',
     },
     { title: '使用该目录', value: 'ok' },
@@ -102,8 +102,8 @@ export async function confirmCleanDialog(dir: string, isOurs: boolean): Promise<
     {
       modal: true,
       detail: isOurs
-        ? `目录 ${dir} 由 Auto CMake Flash 创建，删除后需要重新配置与编译。`
-        : `目录 ${dir} 不是 Auto CMake Flash 创建的（没有插件标记文件）。删除后无法恢复，请确认其中没有需要保留的内容。`,
+        ? `目录 ${dir} 由 Embedded Debug 创建，删除后需要重新配置与编译。`
+        : `目录 ${dir} 不是 Embedded Debug 创建的（没有插件标记文件）。删除后无法恢复，请确认其中没有需要保留的内容。`,
     },
     { title: '删除', value: 'ok' },
   );

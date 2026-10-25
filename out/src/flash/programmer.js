@@ -115,12 +115,18 @@ async function performFlash(deps) {
         log(blocker);
         return { status: 'blocked', downloaded: false, verify: 'skipped', messages: [blocker], blocker };
     }
-    // 3. ST-LINK 探头检测（硬件在线 ≠ 软件已安装）
-    log(`检测 ST-LINK 探头: "${cli.cliPath}" -l`);
+    // 3. ST-LINK 探头检测（硬件在线 ≠ 软件已安装）——成功路径不刷日志，失败才展开
     const probeRun = await cli.listProbes();
     const probes = (0, verification_1.parseProbeList)(probeRun.stdout);
-    log(`探头检测结果: ${probes.count} 个；退出码 ${probeRun.exitCode}` +
-        (probeRun.spawnError ? `；错误: ${probeRun.spawnError}` : ''));
+    if (probes.count === 0 || probeRun.spawnError) {
+        log(`检测 ST-LINK 探头: "${cli.cliPath}" -l`);
+        log(`探头检测结果: ${probes.count} 个；退出码 ${probeRun.exitCode}` +
+            (probeRun.spawnError ? `；错误: ${probeRun.spawnError}` : ''));
+        log(`ST-LINK 列表命令原始输出:\n${probeRun.stdout}`);
+    }
+    if (probes.count > 0) {
+        log(`ST-LINK: 已连接（${probes.count} 个探头）`);
+    }
     if (deps.precheck.warnings.length > 0) {
         for (const w of deps.precheck.warnings) {
             log(`警告: ${w}`);
@@ -140,15 +146,18 @@ async function performFlash(deps) {
             exitCode: probeRun.exitCode,
         };
     }
-    // 4. 目标连接预检
-    log(`连接目标预检: "${cli.cliPath}" -c port=${settings.iface} freq=${settings.speedKhz}`);
+    // 3.5 上次调试异常退出可能留下孤儿 GDB Server 占着 ST-LINK，连接预检前清掉
+    await deps.killOrphanProbeHolders?.();
+    // 4. 目标连接预检——成功一行，失败展开完整输出
     const connRun = await cli.connectProbe({
         iface: settings.iface,
         speedKhz: settings.speedKhz,
     });
     const target = (0, verification_1.parseConnectResult)(connRun.stdout, connRun.exitCode);
-    log(`目标连接状态: ${describeTarget(target)}`);
     if (!target.connected) {
+        log(`连接目标预检: "${cli.cliPath}" -c port=${settings.iface} freq=${settings.speedKhz}`);
+        log(`目标连接失败: ${describeTarget(target)}`);
+        log(`连接命令原始输出:\n${connRun.stdout}${connRun.stderr ? `\n[stderr]\n${connRun.stderr}` : ''}`);
         // 连接成功时不再倒出完整原始输出，仅在失败时保留完整记录便于排查
         log(`连接命令原始输出:\n${connRun.stdout}${connRun.stderr ? `\n[stderr]\n${connRun.stderr}` : ''}`);
         const hints = (0, verification_1.stlinkFailureHints)(`${connRun.stdout}\n${connRun.stderr}`);
@@ -189,9 +198,7 @@ async function performFlash(deps) {
         log('用户取消了烧录操作。');
         return { status: 'cancelled', downloaded: false, verify: 'skipped', messages: ['用户取消操作'] };
     }
-    // 6. 下载 + 校验
-    log(`开始烧录: "${cli.cliPath}" -c port=${settings.iface} freq=${settings.speedKhz} ` +
-        `-d "${artifact.path}"${binAddress ? ` ${binAddress}` : ''} -v`);
+    // 6. 下载 + 校验——成功只记结果行，失败保留命令与完整输出
     const dlRun = await cli.download({
         iface: settings.iface,
         speedKhz: settings.speedKhz,
@@ -200,11 +207,13 @@ async function performFlash(deps) {
         verify: true,
     });
     const dl = (0, verification_1.parseDownloadResult)(dlRun.stdout, dlRun.exitCode, true);
-    log(`烧录命令退出码: ${dlRun.exitCode}；下载判定: ${dl.downloaded ? '成功' : '失败'}；校验判定: ${dl.verify}`);
     if (dl.downloaded) {
-        log(`烧录过程:\n${compactCliOutput(dlRun.stdout)}`);
+        log(`烧录成功: ${path.basename(artifact.path)}（${(artifact.sizeBytes / 1024).toFixed(1)} KB → 0x08000000），校验通过`);
     }
     else {
+        log(`开始烧录: "${cli.cliPath}" -c port=${settings.iface} freq=${settings.speedKhz} ` +
+            `-d "${artifact.path}"${binAddress ? ` ${binAddress}` : ''} -v`);
+        log(`烧录失败: 退出码 ${dlRun.exitCode}；下载 ${dl.downloaded ? '成功' : '失败'}；校验 ${dl.verify}`);
         log(`烧录命令原始输出（失败，完整记录）:\n${dlRun.stdout}${dlRun.stderr ? `\n[stderr]\n${dlRun.stderr}` : ''}`);
     }
     messages.push(...dl.notes);
@@ -221,9 +230,6 @@ async function performFlash(deps) {
                 resetFailed = true;
                 messages.push(`复位命令执行失败（退出码 ${rstRun.exitCode}），固件已写入，可手动复位。`);
                 log(`复位失败: ${rstRun.stderr || rstRun.stdout}`);
-            }
-            else {
-                log('目标复位完成。');
             }
         }
         catch (e) {

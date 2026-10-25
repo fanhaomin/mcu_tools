@@ -315,4 +315,40 @@ const catalogO0 = (0, dwarf_1.parseReadelfInfo)(dumpO0);
     strict_1.default.equal((0, dwarf_1.encodeValueText)('abc', i32, 'i32', 4), undefined);
     strict_1.default.equal((0, dwarf_1.encodeValueText)('', i32, 'i32', 4), undefined);
 });
+// ---------------- char 数组按字符串显示 ----------------
+(0, node_test_1.test)('char 数组聚合值：显示为字符串（NUL 截止）', () => {
+    const t = {
+        cat: 'array',
+        label: 'char[23]',
+        bytes: 23,
+        count: 23,
+        elem: { cat: 'scalar', kind: 'u8', label: 'char', bytes: 1 },
+    };
+    const buf = Buffer.from('Debugger variable test zzz', 'ascii');
+    const r = (0, dwarf_1.decodeByType)(buf, t);
+    strict_1.default.equal(r.value, '"Debugger variable test"');
+});
+(0, node_test_1.test)('char 数组聚合值：不可打印字节转义、无 NUL 时截断', () => {
+    const t = {
+        cat: 'array',
+        label: 'char[4]',
+        bytes: 4,
+        count: 4,
+        elem: { cat: 'scalar', kind: 'u8', label: 'char', bytes: 1 },
+    };
+    const r = (0, dwarf_1.decodeByType)(Buffer.from([0x41, 0x0a, 0x22, 0x5c]), t);
+    const exp = String.fromCharCode(0x22, 0x41, 0x5c, 0x6e, 0x5c, 0x22, 0x5c, 0x5c, 0x22);
+    strict_1.default.equal(r.value, exp);
+});
+(0, node_test_1.test)('uint8_t 数组聚合值：不按字符串显示', () => {
+    const t = {
+        cat: 'array',
+        label: 'uint8_t[4]',
+        bytes: 4,
+        count: 4,
+        elem: { cat: 'scalar', kind: 'u8', label: 'uint8_t', bytes: 1 },
+    };
+    const r = (0, dwarf_1.decodeByType)(Buffer.from([1, 2, 3, 4]), t);
+    strict_1.default.equal(r.value, '[4 项]');
+});
 //# sourceMappingURL=dwarf.test.js.map

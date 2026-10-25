@@ -297,7 +297,7 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
             ctx.fillText('未在调试中', W / 2, H / 2 - 8);
             ctx.fillStyle = 'rgba(128,128,128,.7)';
             ctx.font = '10.5px ' + fontFam;
-            ctx.fillText('启动调试（ACF 编译并调试）后自动开始绘制曲线', W / 2, H / 2 + 12);
+            ctx.fillText('启动调试（编译并调试）后自动开始绘制曲线', W / 2, H / 2 + 12);
             ctx.textAlign = 'left';
             return;
           }

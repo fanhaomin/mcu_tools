@@ -1,76 +1,15 @@
 /**
  * 调试启动配置生成（纯函数，不依赖 vscode）。
  *
- * 调试层按「后端」组织，与 flash 层的烧录后端抽象同构：
- * - CortexDebugBackend（本文件）：ARM Cortex-M（STM32/GD32/CH32 非 V 系列）。
- *   复用 cortex-debug 扩展（marus25.cortex-debug），servertype=stlink 时
- *   由它驱动 ST-LINK_gdbserver + arm-none-eabi-gdb，launch 请求经 gdb load
- *   把 ELF 写入芯片并停在 main，与 CubeProgrammer 烧录互不冲突。
+ * 调试引擎仅支持 probe-rs（运行中旁路直读，零停机）：
+ * - 复用 probe-rs-debugger 扩展（probe-rs.probe-rs-debugger）直连 DAP；
+ *   烧录走 CubeProgrammer 链路，调试会话 attach 接管，互不冲突。
  * - 未来 RISC-V（CH32V 系列）/ESP32：新增对应后端（如 cdt-gdb-vscode 的
  *   gdbtarget 通用 GDB 适配器 + 厂商 OpenOCD），实现同一签名并按芯片家族分发，
  *   命令层与门禁逻辑复用。
  */
 
-/** cortex-debug 扩展 ID（运行时检测是否已安装并引导安装） */
-export const CORTEX_DEBUG_EXTENSION_ID = 'marus25.cortex-debug';
-
-export interface DebugLaunchSpec {
-  /** 工作区根目录（作为调试会话 cwd） */
-  root: string;
-  /** ELF 固件路径（调试必须 ELF；HEX/BIN 无调试信息，断点无法命中源码行） */
-  elfPath: string;
-  /** 芯片型号，如 STM32F103C8；证据不足时传基础型号或 STM32 */
-  device: string;
-  /** 调试接口 */
-  interface: 'SWD' | 'JTAG';
-  /** arm-none-eabi-gdb 完整路径 */
-  gdbPath: string;
-  /** ST-LINK_gdbserver 完整路径 */
-  gdbServerPath: string;
-  /**
-   * STM32CubeProgrammer 的 bin 目录（可选但强烈建议）。
-   * gdbserver 的 -cp 参数用它加载 Flash 烧写库；不钉死时 cortex-debug 会自己搜
-   * STM32CubeIDE 安装，抓到与 gdbserver 版本不配套的库 → "Error finishing flash
-   * operation (from target-download)"。
-   */
-  cubeProgrammerPath?: string;
-  /** 可选 SVD 文件路径（调试时显示外设寄存器视图） */
-  svdFile?: string;
-  /**
-   * launch：下载固件并停在 main（固件由调试会话经 gdb load 写入，不走烧录确认窗口）；
-   * attach：只连接正在运行的目标，不写任何内容。
-   */
-  request: 'launch' | 'attach';
-}
-
-/** 生成 cortex-debug 的 launch/attach 配置（字段与 cortex-debug 1.x launch.json 一致） */
-export function buildCortexDebugLaunch(spec: DebugLaunchSpec): Record<string, unknown> {
-  const config: Record<string, unknown> = {
-    type: 'cortex-debug',
-    name:
-      spec.request === 'launch'
-        ? 'Auto CMake Flash: 调试 (ST-LINK)'
-        : 'Auto CMake Flash: 附加调试 (ST-LINK)',
-    request: spec.request,
-    servertype: 'stlink',
-    cwd: spec.root,
-    executable: spec.elfPath,
-    device: spec.device,
-    interface: spec.interface.toLowerCase(),
-    gdbPath: spec.gdbPath,
-    serverpath: spec.gdbServerPath,
-  };
-  if (spec.svdFile) {
-    config.svdFile = spec.svdFile;
-  }
-  if (spec.cubeProgrammerPath) {
-    config.stm32cubeprogrammer = spec.cubeProgrammerPath;
-  }
-  if (spec.request === 'launch') {
-    config.runToEntryPoint = 'main';
-  }
-  return config;
-}
+// ---------------- probe-rs 引擎 ----------------
 
 /**
  * 从 CMakeCache.txt 解析构建类型。
@@ -92,8 +31,6 @@ export function isDebuggableBuildType(buildType: string | undefined): boolean {
   }
   return /debug|relwithdebinfo/i.test(buildType);
 }
-
-// ---------------- probe-rs 引擎 ----------------
 
 /** probe-rs 调试扩展 ID */
 export const PROBE_RS_EXTENSION_ID = 'probe-rs.probe-rs-debugger';
@@ -128,7 +65,7 @@ export function buildProbeRsLaunch(spec: ProbeRsLaunchSpec): Record<string, unkn
   const launch = spec.request === 'launch';
   const config: Record<string, unknown> = {
     type: 'probe-rs-debug',
-    name: launch ? 'Auto CMake Flash: 调试 (probe-rs)' : 'Auto CMake Flash: 附加调试 (probe-rs)',
+    name: launch ? 'Embedded Debug: 调试 (probe-rs)' : 'Embedded Debug: 附加调试 (probe-rs)',
     request: spec.request,
     cwd: spec.root,
     chip: spec.chip,

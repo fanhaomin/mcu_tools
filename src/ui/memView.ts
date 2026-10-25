@@ -6,7 +6,7 @@
  */
 
 import * as vscode from 'vscode';
-import { readBlock, sampleWhileRunning, delay } from '../debug/dapHelpers';
+import { readBlock, delay } from '../debug/dapHelpers';
 
 export interface MemViewDeps {
   getSession(): vscode.DebugSession | undefined;
@@ -112,16 +112,13 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const hex = `0x${(value & 0xff).toString(16)}`;
-    // 首选标准 DAP writeMemory（probe-rs / cortex-debug 均支持，运行中可写）
-    const writeMem = async (): Promise<void> => {
+    // 首选标准 DAP writeMemory（probe-rs 运行中可写）
+    try {
       await s.customRequest('writeMemory', {
         memoryReference: `0x${addr.toString(16)}`,
         count: 1,
         data: Buffer.from([value & 0xff]).toString('base64'),
       });
-    };
-    try {
-      await writeMem();
       this.deps.log(`内存写入: [0x${addr.toString(16)}] = ${hex}`);
       return;
     } catch (e) {
@@ -129,7 +126,7 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
         `内存写入 writeMemory 失败 [0x${addr.toString(16)}]（${s.type}）: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
-    // 回退：GDB evaluate 赋值（cortex-debug）
+    // 回退：evaluate 赋值
     try {
       await s.customRequest('evaluate', {
         expression: `set {unsigned char}0x${addr.toString(16)} = ${hex}`,
@@ -141,18 +138,6 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
       this.deps.log(
         `内存写入失败 [0x${addr.toString(16)}]: ${e instanceof Error ? e.message : String(e)}`,
       );
-    }
-    // cortex-debug 运行中：微停机窗口再试一次 writeMemory
-    if (s.type !== 'probe-rs-debug') {
-      try {
-        const ok = await sampleWhileRunning(s, this.deps.log, writeMem);
-        if (ok) {
-          this.deps.log(`内存写入（微停机窗口）: [0x${addr.toString(16)}] = ${hex}`);
-          return;
-        }
-      } catch {
-        // 落入失败提示
-      }
     }
     void this.view?.webview.postMessage({
       cmd: 'toast',
@@ -176,23 +161,14 @@ export class MemViewProvider implements vscode.WebviewViewProvider {
     if (!s) {
       return;
     }
-    const nonIntrusive = s.type === 'probe-rs-debug';
     let buf = await readBlock(s, base, VIEW_BYTES);
     let ok = !!buf;
 
     if (!ok) {
-      if (nonIntrusive) {
-        // probe-rs 运行中偶发失败：短暂等待重试一次（不动目标）
-        await delay(30);
-        buf = await readBlock(s, base, VIEW_BYTES);
-        ok = !!buf;
-      } else {
-        // cortex-debug：微停机窗口读取
-        await sampleWhileRunning(s, this.deps.log, async () => {
-          buf = await readBlock(s, base, VIEW_BYTES);
-          ok = !!buf;
-        });
-      }
+      // 运行中偶发失败：短暂等待重试一次（不动目标）
+      await delay(30);
+      buf = await readBlock(s, base, VIEW_BYTES);
+      ok = !!buf;
     }
 
     void this.view?.webview.postMessage({

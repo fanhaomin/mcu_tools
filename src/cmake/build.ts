@@ -142,7 +142,9 @@ export async function buildProject(input: BuildInput): Promise<BuildOutcome> {
     args.push('--target', input.target);
   }
 
-  log(`开始编译${input.target ? ` 目标 ${input.target}` : ''} (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`);
+  log(
+    `编译${input.target ? ` 目标 ${input.target}` : ''} (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`,
+  );
   const result = await execFileSafe(input.cmakePath, args, {
     cwd: input.root,
     timeoutMs: input.timeoutMs ?? 600_000,
@@ -194,7 +196,7 @@ export async function buildProject(input: BuildInput): Promise<BuildOutcome> {
 
   log(
     success
-      ? `编译成功，耗时 ${(record.durationMs / 1000).toFixed(1)}s${elfPath ? `，ELF: ${elfPath}` : ''}`
+      ? `编译成功（${(record.durationMs / 1000).toFixed(1)}s）${elfPath ? ` ELF: ${elfPath}` : ''}`
       : `编译失败，退出码 ${result.exitCode}${result.timedOut ? '（超时）' : ''}${result.cancelled ? '（用户取消）' : ''}，共解析出 ${diagnostics.filter((d) => d.severity === 'error').length} 个错误`,
   );
 

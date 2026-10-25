@@ -163,7 +163,7 @@ export class IocLauncherEditorProvider
           ${primaryBtn}
           <button class="btn" onclick="post('openAsText')">用文本编辑器查看</button>
         </div>
-        <div class="foot">Auto CMake Flash · STM32CubeMX 工程快捷入口</div>
+        <div class="foot">Embedded Debug · STM32CubeMX 工程快捷入口</div>
       </div>
       <script>
         const vscode = acquireVsCodeApi();

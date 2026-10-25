@@ -25,7 +25,7 @@ interface RegLite {
 export interface PeriphViewDeps {
   getSvd(): { device: SvdDevice; file: string } | undefined;
   getSvdStatus(): string | undefined;
-  /** 当前可用的调试会话（cortex-debug），无则 undefined */
+  /** 当前可用的调试会话（probe-rs），无则 undefined */
   getSession(): vscode.DebugSession | undefined;
   log(msg: string): void;
   /** 调试面板统一刷新间隔 ms */
@@ -94,7 +94,7 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       active: !!s,
       name: s?.name,
       // probe-rs 引擎 = 运行中旁路直读，无需微停机采样，隐藏「运行监视」按钮
-      engine: s ? (s.type === 'probe-rs-debug' ? 'probe-rs' : 'cortex-debug') : undefined,
+      engine: s ? 'probe-rs' : undefined,
     });
   }
 
@@ -190,12 +190,12 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
 
   private session(): vscode.DebugSession | undefined {
     const s = this.deps.getSession();
-    return s && (s.type === 'cortex-debug' || s.type === 'probe-rs-debug') ? s : undefined;
+    return s && s.type === 'probe-rs-debug' ? s : undefined;
   }
 
   private async readAll(
     items: { key: string; addr: number; size: number }[],
-    monitor: boolean,
+    _monitor: boolean,
   ): Promise<Record<string, { hex: string; ok: boolean }>> {
     const s = this.session();
     const out: Record<string, { hex: string; ok: boolean }> = {};
@@ -205,49 +205,20 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       }
       return out;
     }
-    // 按地址分组批量读取：每个分组一次 readMemory 往返，
-    // 把运行监视的暂停窗口从 N 次往返压缩到 1-2 次
+    // 按地址分组批量读取：每个分组一次 readMemory 往返
     const groups = groupRanges(items);
-    const failed: { key: string; addr: number; size: number }[] = [];
     await Promise.all(
       groups.map(async (g) => {
         const buf = await this.readBlock(s, g.start, g.len);
-        if (!buf) {
-          for (const it of g.items) {
-            failed.push(it);
-            out[it.key] = { hex: '…', ok: false };
-          }
-          return;
-        }
         for (const it of g.items) {
-          out[it.key] = { hex: this.toHex(buf.subarray(it.addr - g.start), it.size), ok: true };
+          out[it.key] = buf
+            ? { hex: this.toHex(buf.subarray(it.addr - g.start), it.size), ok: true }
+            : { hex: '…', ok: false };
         }
       }),
     );
-    // 运行监视（微停机采样）仅用于 cortex-debug 停机式引擎。
     // probe-rs 支持运行中旁路直读（Keil 同机制）——旁路读取本身不打扰程序，
     // 若个别时刻读失败（目标瞬断等）保持旧值显示，绝不做暂停采样（会导致程序顿挫闪烁）。
-    const nonIntrusive = s.type === 'probe-rs-debug';
-    if (failed.length > 0 && monitor && !nonIntrusive) {
-      await this.sampleWhileRunning(s, async () => {
-        await Promise.all(
-          groups
-            .filter((g) => g.items.some((it) => failed.includes(it)))
-            .map(async (g) => {
-              const buf = await this.readBlock(s, g.start, g.len);
-              if (!buf) {
-                return;
-              }
-              for (const it of g.items) {
-                if (!failed.includes(it)) {
-                  continue;
-                }
-                out[it.key] = { hex: this.toHex(buf.subarray(it.addr - g.start), it.size), ok: true };
-              }
-            }),
-        );
-      });
-    }
     return out;
   }
 
@@ -261,66 +232,6 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       return buf.length > 0 ? buf : undefined;
     } catch (e) {
       this.logErr(`readMemory 0x${addr.toString(16)}`, e);
-      return undefined;
-    }
-  }
-
-  /** 微停机采样：暂停目标 → 执行读取 → 立即恢复。返回读取是否成功 */
-  private async sampleWhileRunning(s: vscode.DebugSession, fn: () => Promise<void>): Promise<boolean> {
-    // 暂停（目标运行中时 gdb 列不出线程，threadId 允许缺省）
-    let pre: number | undefined;
-    try {
-      pre = await this.tryThreadId(s);
-    } catch (e) {
-      this.logErr('threads(暂停前)', e);
-    }
-    try {
-      await s.customRequest('pause', pre !== undefined ? { threadId: pre } : {});
-    } catch (e) {
-      this.logErr('pause', e);
-      return false;
-    }
-    // 暂停后再取线程 ID（停机状态下可靠）；稍等 gdb 稳定，最多重试两次
-    await delay(20);
-    let threadId = await this.tryThreadId(s);
-    if (threadId === undefined) {
-      await delay(100);
-      threadId = await this.tryThreadId(s);
-    }
-    let ok = true;
-    try {
-      await fn();
-    } catch {
-      ok = false;
-    }
-    // 恢复运行：必须有有效 threadId；取不到则保持暂停并明确提示，绝不发空参数
-    if (threadId === undefined) {
-      this.deps.log('运行监视: 无法获取线程 ID，目标保持暂停 — 请手动点继续（F5）');
-      return ok;
-    }
-    try {
-      await s.customRequest('continue', { threadId });
-    } catch {
-      // 一次重试：重新获取线程后再试
-      await delay(60);
-      const tid2 = await this.tryThreadId(s);
-      try {
-        if (tid2 === undefined) {
-          throw new Error('未获取到线程');
-        }
-        await s.customRequest('continue', { threadId: tid2 });
-      } catch (e2) {
-        this.deps.log(`运行监视: 恢复运行失败，目标保持暂停 — 请手动点继续（F5）— ${e2 instanceof Error ? e2.message : String(e2)}`);
-      }
-    }
-    return ok;
-  }
-
-  private async tryThreadId(s: vscode.DebugSession): Promise<number | undefined> {
-    try {
-      const th = (await s.customRequest('threads')) as { threads?: { id: number }[] };
-      return th?.threads && th.threads.length > 0 ? th.threads[0].id : undefined;
-    } catch {
       return undefined;
     }
   }
@@ -738,10 +649,6 @@ function lowestBit(mask: number): number {
     n++;
   }
   return n;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface ReadItem {

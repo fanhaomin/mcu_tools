@@ -53,7 +53,7 @@ const path_1 = require("../util/path");
 const artifacts_1 = require("./artifacts");
 function generateToolchainFileContent(cCompiler, cppCompiler, opts = {}) {
     const lines = [
-        '# 由 Auto CMake Flash 自动生成（位于 .auto-cmake-flash/ 目录，可随时删除）。',
+        '# 由 Embedded Debug 自动生成（位于 .auto-cmake-flash/ 目录，可随时删除）。',
     ];
     if (opts.includeOriginalToolchain) {
         lines.push('# 先加载工程原有工具链设置（如 CubeMX 的 gcc-arm-none-eabi.cmake），', '# 再由下方完整路径设置覆盖编译器，确保不依赖 PATH。', `include("${opts.includeOriginalToolchain.replace(/\\/g, '/')}")`, '');
@@ -146,7 +146,7 @@ async function configureProject(input) {
             if (!okToUse) {
                 return {
                     ok: false,
-                    reason: `目录 ${buildDir} 已存在且不是 Auto CMake Flash 创建的，用户取消了操作。` +
+                    reason: `目录 ${buildDir} 已存在且不是 Embedded Debug 创建的，用户取消了操作。` +
                         '可修改设置 autoCmakeFlash.buildDir 换一个目录。',
                 };
             }

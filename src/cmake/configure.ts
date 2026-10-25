@@ -50,7 +50,7 @@ export function generateToolchainFileContent(
   opts: { cpuFlags?: string; includeOriginalToolchain?: string } = {},
 ): string {
   const lines: string[] = [
-    '# 由 Auto CMake Flash 自动生成（位于 .auto-cmake-flash/ 目录，可随时删除）。',
+    '# 由 Embedded Debug 自动生成（位于 .auto-cmake-flash/ 目录，可随时删除）。',
   ];
   if (opts.includeOriginalToolchain) {
     lines.push(
@@ -171,7 +171,7 @@ export async function configureProject(input: ConfigureInput): Promise<Configure
       if (!okToUse) {
         return {
           ok: false,
-          reason: `目录 ${buildDir} 已存在且不是 Auto CMake Flash 创建的，用户取消了操作。` +
+          reason: `目录 ${buildDir} 已存在且不是 Embedded Debug 创建的，用户取消了操作。` +
             '可修改设置 autoCmakeFlash.buildDir 换一个目录。',
         };
       }

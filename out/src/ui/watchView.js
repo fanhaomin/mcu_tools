@@ -12,7 +12,7 @@
  *
  * 树形展开：DWARF 路径按类型描述物化子节点（数组元素/结构体成员/嵌套递归），
  * 一次整块读取后按偏移切片解码；DAP 捕获路径展开 elements via variables。
- * 读取：probe-rs 运行中旁路直读；cortex-debug 停机式引擎自动微停机采样。
+ * 读取：probe-rs 运行中旁路直读。
  * 条目与子节点持久化在 workspaceState（每个工程独立）。
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -95,8 +95,10 @@ class WatchViewProvider {
     symLoading;
     dwarfCache;
     dwarfLoading;
-    lastProbeSample = 0;
     lastEmptySymLog = 0;
+    lastDwarfApply = 0;
+    /** 上次存在性核验的 ELF 标识（路径+mtime）：同 ELF 只核验一次，重编译后重跑 */
+    membershipElf;
     /** 用户拖拽的列宽（%，4 列），持久化 */
     colw = [...DEF_COLW];
     /** 并发闸：上一次刷新未完成时跳过本轮 tick（读取堆积表现为值跳变/迟滞） */
@@ -126,8 +128,11 @@ class WatchViewProvider {
         this.ensureRestored();
         this.postEntries();
         this.pushSessionState(!!this.deps.getSession());
-        void this.applyDwarf().then((ch) => {
-            if (ch) {
+        // 打开面板/开调试即核验：持久化的过期地址（变量已删除）立即标红，不显示脏值
+        void this.applyDwarf()
+            .then(() => this.enforceElfMembership())
+            .then((r) => {
+            if (r) {
                 this.postEntries();
             }
         });
@@ -225,32 +230,19 @@ class WatchViewProvider {
             void vscode.window.showErrorMessage(`变量监控: 写入 ${expr}${path || ''} 失败（引擎不支持或目标运行中且无法暂停，详见日志）。`);
         }
     }
-    /** 写内存：优先 DAP writeMemory（两引擎通用）；cortex-debug 运行中失败时微停机重试 */
+    /** 写内存：DAP writeMemory（probe-rs 运行中可写） */
     async writeMemory(s, ref, buf) {
-        const data = buf.toString('base64');
-        const attempt = async () => {
+        try {
             await s.customRequest('writeMemory', {
                 memoryReference: ref,
                 count: buf.length,
-                data,
+                data: buf.toString('base64'),
             });
-        };
-        try {
-            await attempt();
             return true;
         }
         catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            this.deps.log(`变量监控: writeMemory 失败（${s.type}）: ${msg}`);
-            if (s.type === 'probe-rs-debug') {
-                return false;
-            }
-            try {
-                return await (0, dapHelpers_1.sampleWhileRunning)(s, this.deps.log, attempt);
-            }
-            catch {
-                return false;
-            }
+            this.deps.log(`变量监控: writeMemory 失败（${s.type}）: ${e instanceof Error ? e.message : String(e)}`);
+            return false;
         }
     }
     /** 目标暂停（断点/复位停机）时由扩展调用：按名捕获 memoryReference / varRef / 子节点 */
@@ -264,6 +256,11 @@ class WatchViewProvider {
         }
         let hit = 0;
         for (const e of this.entries) {
+            // 已判定「不在 ELF 中」（被优化消除/已删除）的条目不再捕获——
+            // 调试器作用域里即使能按名找到，读出来的也是无效句柄/垃圾值
+            if (e.resolveFailed) {
+                continue;
+            }
             if (e.memRef || e.addr !== undefined || e.varRef !== undefined) {
                 continue;
             }
@@ -373,7 +370,7 @@ class WatchViewProvider {
                 if (!e) {
                     return;
                 }
-                const fmt = m.fmt === 'dec' || m.fmt === 'hex' || m.fmt === 'bin' || m.fmt === 'char'
+                const fmt = m.fmt === 'dec' || m.fmt === 'hex' || m.fmt === 'bin' || m.fmt === 'char' || m.fmt === 'multi'
                     ? m.fmt
                     : 'auto';
                 const path = m.path ?? '';
@@ -423,8 +420,10 @@ class WatchViewProvider {
                 }
                 await this.persist();
                 this.postEntries();
-                // 立即尝试 DWARF 解析（无需调试会话，类型/地址马上可见）
-                void this.applyDwarf().then(() => this.postEntries());
+                // 立即尝试 DWARF 解析（无需调试会话，类型/地址马上可见）+ 存在性门禁
+                void this.applyDwarf()
+                    .then(() => this.enforceElfMembership())
+                    .then(() => this.postEntries());
                 break;
             }
             case 'remove': {
@@ -442,7 +441,10 @@ class WatchViewProvider {
                 if (!path) {
                     e.expanded = !e.expanded;
                     if (e.expanded && !e.children) {
-                        if (e.type && e.addr !== undefined) {
+                        if (e.type && e.type.cat === 'ptr' && e.type.elem) {
+                            e.children = [this.derefChild(e.type, '')];
+                        }
+                        else if (e.type && e.addr !== undefined) {
                             e.children = (0, dwarf_1.materializeChildren)(e.addr, e.type, '') ?? [];
                         }
                         else if (e.varRef) {
@@ -457,8 +459,14 @@ class WatchViewProvider {
                     const c = this.findChild(e, path);
                     if (c) {
                         c.expanded = !c.expanded;
-                        if (c.expanded && !c.children && c.type && c.addr !== undefined) {
-                            c.children = (0, dwarf_1.materializeChildren)(c.addr, c.type, path) ?? [];
+                        if (c.expanded && !c.children && c.type) {
+                            if (c.type.cat === 'ptr' && c.type.elem) {
+                                c.children = [this.derefChild(c.type, path)];
+                            }
+                            else if (c.addr !== undefined || c.deref) {
+                                // deref 节点静态地址未知：子节点按偏移物化（读取时以运行时地址为基）
+                                c.children = (0, dwarf_1.materializeChildren)(c.addr ?? 0, c.type, path) ?? [];
+                            }
                         }
                     }
                 }
@@ -570,7 +578,7 @@ class WatchViewProvider {
                 (v.scope ? ` · ${v.scope}()` : v.external ? ' · 全局' : ' · static'),
             name: v.name,
         })), {
-            title: 'Auto CMake Flash — 浏览 ELF 变量（选中即加入监控，可多选）',
+            title: 'Embedded Debug — 浏览 ELF 变量（选中即加入监控，可多选）',
             placeHolder: '输入名称过滤',
             canPickMany: true,
             ignoreFocusOut: true,
@@ -588,7 +596,7 @@ class WatchViewProvider {
         if (added > 0) {
             this.deps.log(`变量监控: 从变量浏览添加 ${added} 个条目`);
             this.postEntries();
-            void vscode.window.showInformationMessage(`Auto CMake Flash: 已添加 ${added} 个变量到监控。`);
+            void vscode.window.showInformationMessage(`Embedded Debug: 已添加 ${added} 个变量到监控。`);
         }
     }
     /** 解析 &表达式 → 地址，sizeof → 字节数（限频；失败保持旧值继续重试） */
@@ -629,7 +637,7 @@ class WatchViewProvider {
             this.deps.log(`变量监控: ${e.expr} @ 0x${addr.toString(16)} (${e.bytes} bytes)`);
         }
         catch {
-            // 目标运行中（cortex-debug）无法 evaluate：留给微停机窗口处理
+            // evaluate 不可用/失败：走 ELF 符号表 + DWARF 离线解析兜底
         }
     }
     /** DWARF 目录（按 ELF+mtime 缓存）；无 readelf / 无调试信息返回空目录 */
@@ -677,8 +685,10 @@ class WatchViewProvider {
      * 类型变化时重建子节点（展开状态重置一次属预期）。
      */
     async applyDwarf() {
-        const pending = this.entries.filter((e) => e.addr === undefined && !e.memRef);
-        const refreshable = this.entries.filter((e) => e.addr !== undefined && !e.explicitType && !e.memRef);
+        // 已判定「不在 ELF 中」的条目不再尝试解析——除非重编译后门禁解除标红
+        const pending = this.entries.filter((e) => e.addr === undefined && !e.memRef && e.resolveFailed !== true);
+        // memRef 条目（断点捕获）若 DWARF 按名命中静态地址，同样以 DWARF 为准（memRef 句柄会过期）
+        const refreshable = this.entries.filter((e) => !e.explicitType && (e.addr !== undefined || e.memRef));
         if (pending.length === 0 && refreshable.length === 0) {
             return false;
         }
@@ -698,6 +708,20 @@ class WatchViewProvider {
         for (const e of pending) {
             const v = cat.byName.get(e.expr.replace(/^&/, '').trim());
             if (!v) {
+                continue;
+            }
+            // DWARF 里地址为 0 = 未实例化（extern 无定义/被消除，链接器填 0）：
+            // 读 0 读到向量表全是乱码。直接判「不在 ELF 中」，不给地址不读取。
+            if (v.addr === 0) {
+                e.resolveFailed = true;
+                e.resolveTries = 3;
+                e.addr = undefined;
+                e.capturedValue = undefined;
+                e.memRef = undefined;
+                e.varRef = undefined;
+                e.children = undefined;
+                changed = true;
+                this.deps.log(`变量监控: ${e.expr} 的 DWARF 地址为 0（未实例化/被优化消除），视为不存在`);
                 continue;
             }
             e.addr = v.addr;
@@ -724,22 +748,80 @@ class WatchViewProvider {
         for (const e of refreshable) {
             const v = cat.byName.get(e.expr.replace(/^&/, '').trim());
             if (!v) {
+                // 挂着持久化地址但 DWARF 查无此名：再对 nm 符号表兜底确认。
+                // nm 也查无 = 已删除。nm 命中 = static/汇编符号（nm 视角不同），保留。
+                if (e.addr !== undefined && !e.explicitType && !e.memRef) {
+                    const sym = await this.ensureSymbols();
+                    if ((cat.byName.size > 0 || sym.size > 0) && !sym.get(e.expr.replace(/^&/, '').trim())) {
+                        e.resolveFailed = true;
+                        e.resolveTries = 3;
+                        e.addr = undefined;
+                        e.children = undefined;
+                        e.capturedValue = undefined;
+                        e.memRef = undefined;
+                        e.varRef = undefined;
+                        changed = true;
+                        this.deps.log(`变量监控: ${e.expr} 已不在 ELF 中（重编译后被删除），停止读取旧地址`);
+                    }
+                }
                 continue;
             }
+            // 按名命中：清早前的失败标记——除非 DWARF 地址为 0（未实例化，见下）
+            if ((e.resolveFailed || e.resolveTries) && v.addr !== 0) {
+                e.resolveFailed = false;
+                e.resolveTries = 0;
+            }
+            // DWARF 地址为 0 = 未实例化（extern 无定义/被优化消除，链接器填 0）：
+            // 读取会得到向量表乱码。清地址、标红，不再读取。
+            if (v.addr === 0) {
+                if (e.addr !== undefined || e.resolveFailed !== true) {
+                    e.resolveFailed = true;
+                    e.resolveTries = 3;
+                    e.addr = undefined;
+                    e.capturedValue = undefined;
+                    e.memRef = undefined;
+                    e.varRef = undefined;
+                    e.children = undefined;
+                    changed = true;
+                    this.deps.log(`变量监控: ${e.expr} 的 DWARF 地址为 0（未实例化/被优化消除），视为不存在`);
+                }
+                continue;
+            }
+            // 地址变了也要刷新：重编译后符号在 Flash/RAM 里的位置会移动，
+            // 旧地址读出来全是乱码（类型对、数据错就是这种）
+            // 指针缺被指类型（旧版解析遗留）也算过期，否则解引用展不开
             const stale = !e.type ||
                 e.type.cat !== v.type.cat ||
                 e.typeLabel !== v.type.label ||
-                e.bytes !== (0, dwarf_1.legacyFieldsOf)(v.type, AGG_READ_CAP).bytes;
+                e.bytes !== (0, dwarf_1.legacyFieldsOf)(v.type, AGG_READ_CAP).bytes ||
+                e.addr !== v.addr ||
+                (e.type.cat === 'ptr' && v.type.cat === 'ptr' && !e.type.elem && !!v.type.elem);
             if (!stale) {
                 continue;
             }
+            const addrMoved = e.addr !== v.addr;
             e.type = v.type;
             e.typeLabel = v.type.label;
             const lf = (0, dwarf_1.legacyFieldsOf)(v.type, AGG_READ_CAP);
             e.kind = lf.kind;
             e.bytes = lf.bytes;
-            e.children = undefined;
-            e.expanded = false;
+            // DWARF 静态地址是权威：清掉过期的断点捕获句柄，读取走 DWARF 地址
+            if (e.memRef || e.varRef) {
+                e.memRef = undefined;
+                e.varRef = undefined;
+                changed = true;
+            }
+            if (addrMoved) {
+                if (e.addr !== undefined) {
+                    this.deps.log(`变量监控: ${e.expr} 地址已更新 0x${e.addr.toString(16)} → 0x${v.addr.toString(16)}（重编译后符号移动）`);
+                }
+                e.addr = v.addr;
+                e.children = undefined; // 子节点地址随父节点重建（保留展开状态）
+            }
+            else {
+                e.children = undefined;
+                e.expanded = false;
+            }
             refreshed++;
             changed = true;
         }
@@ -757,55 +839,167 @@ class WatchViewProvider {
         this.lastSessionOn = on;
         void this.view?.webview.postMessage({ cmd: 'session', on });
     }
+    /** 指针解引用子节点：地址 = 父指针的运行时值（读取周期解析，静态 addr 无效） */
+    derefChild(t, parentPath) {
+        const elem = t.elem;
+        const lf = (0, dwarf_1.legacyFieldsOf)(elem, AGG_READ_CAP);
+        return {
+            name: '→ ' + elem.label,
+            path: (parentPath ? parentPath + '.' : '') + '*',
+            kind: lf.kind,
+            typeLabel: elem.label,
+            bytes: lf.bytes,
+            type: elem,
+            deref: true,
+        };
+    }
+    /**
+     * 存在性门禁（事件触发，不进读取周期）：
+     * - 打开面板/开调试时一次；添加变量时一次；重编译后（ELF mtime 变化）一次。
+     * 挂地址的具名条目逐个对照 nm 符号表，ELF 查无此名 → 清地址、标红「不在 ELF 中」；
+     * 符号恢复 → 解除标红重新解析。手动 0x地址 与断点捕获条目不受影响。
+     */
+    async enforceElfMembership() {
+        const elf = await this.deps.getElf();
+        if (!elf) {
+            return false; // ELF 未就绪：跳过，不误杀
+        }
+        let mtimeMs = 0;
+        try {
+            mtimeMs = fs.statSync(elf).mtimeMs;
+        }
+        catch {
+            return false;
+        }
+        // ELF 未变化且本会话已核验过：不重复跑（闪烁根因就是周期性反复判定）
+        if (this.membershipElf === elf + '|' + mtimeMs) {
+            return false;
+        }
+        this.membershipElf = elf + '|' + mtimeMs;
+        const named = this.entries.filter((e) => !e.explicitType && !e.memRef && e.resolveFailed !== true);
+        if (named.length === 0) {
+            return false;
+        }
+        const sym = await this.ensureSymbols();
+        if (sym.size === 0) {
+            return false; // 无符号表可用：无法判定，跳过
+        }
+        let changed = false;
+        for (const e of named) {
+            const name = e.expr.replace(/^&/, '').trim();
+            if (sym.has(name)) {
+                continue;
+            }
+            // nm 查无 ≠ 一定不存在：static 变量默认不出现在 nm --defined-only 输出。
+            // 再查 DWARF 目录——DWARF 命中且地址有效（≠0）则放行（交由 DWARF 重对管理），
+            // DWARF 也查无（或地址为 0）才判死。
+            const cat = await this.ensureDwarf();
+            const dv = cat.byName.get(name);
+            if (dv && dv.addr !== 0) {
+                continue;
+            }
+            e.resolveFailed = true;
+            e.resolveTries = 3;
+            e.addr = undefined;
+            e.capturedValue = undefined;
+            e.memRef = undefined;
+            e.varRef = undefined;
+            e.children = undefined;
+            changed = true;
+            this.deps.log(`变量监控: ${e.expr} 不在 ELF 中（已删除/未编译/未实例化），停止读取`);
+        }
+        if (changed) {
+            await this.persist();
+            this.postEntries();
+        }
+        return changed;
+    }
     async refresh(intervalMs) {
         const s = this.deps.getSession();
         this.pushSessionState(!!s);
         if (!s || this.entries.length === 0) {
             return;
         }
-        // DWARF 优先解析（离线，零停顿）；新解析出类型/地址时同步条目（类型/地址列即时更新）
-        if (this.entries.some((e) => e.addr === undefined && !e.memRef)) {
+        // DWARF 优先解析（离线，零停顿）；新解析出类型/地址时同步条目（类型/地址列即时更新）。
+        // 已解析条目也要周期性重对：重编译后符号地址会移动（类型对、数据乱码就是这种）
+        if (this.entries.some((e) => e.addr === undefined && !e.memRef) ||
+            Date.now() - this.lastDwarfApply > 5000) {
+            this.lastDwarfApply = Date.now();
             if (await this.applyDwarf()) {
                 this.postEntries();
             }
         }
-        const nonIntrusive = s.type === 'probe-rs-debug';
         const results = {};
         const childVals = {};
-        // ---- DWARF 类型化条目：一次整块读 → 根 + 展开子树按偏移切片解码 ----
-        const readTyped = async (e) => {
-            const want = Math.min(e.bytes, AGG_READ_CAP);
-            const buf = await (0, dapHelpers_1.readBlock)(s, e.addr, Math.max(4, want));
-            childVals[e.expr] = {};
-            if (buf) {
-                const self = buf.subarray(0, Math.min(buf.length, e.bytes));
-                const needBytes = e.type.cat === 'array' || e.type.cat === 'struct' ? 1 : e.bytes;
-                const d = (0, dwarf_1.decodeByType)(self, e.type);
-                results[e.expr] = {
-                    hex: d.hex,
-                    value: d.value,
-                    ok: buf.length >= Math.min(needBytes, want),
-                    bytes: e.bytes,
-                    addr: e.addr,
-                };
-                if (e.expanded && e.children) {
-                    (0, dwarf_1.decodeTypedSubtree)(buf, e.addr, e.children, childVals[e.expr]);
-                }
+        // ---- 数值地址条目：相邻地址合并成段读 ----
+        // DAP 每请求的往返开销 ~1-3ms，远大于字节传输本身（SWD 8MHz 传 1KB 才 ~1ms）；
+        // 同一编译单元的全局量通常相邻，N 个条目常能并成 1-2 次请求读完
+        const SPAN_GAP = 64;
+        const SPAN_MAX = 1024;
+        const spanEntries = this.entries.filter((e) => e.addr !== undefined && (e.type || !e.memRef));
+        const spans = [];
+        for (const e of [...spanEntries].sort((a, b) => a.addr - b.addr)) {
+            const want = e.type ? Math.max(4, Math.min(e.bytes, AGG_READ_CAP)) : e.bytes;
+            const end = e.addr + want;
+            const last = spans[spans.length - 1];
+            if (last && e.addr - last.end <= SPAN_GAP && end - last.start <= SPAN_MAX) {
+                last.end = Math.max(last.end, end);
+                last.items.push(e);
             }
             else {
-                results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr, value: '' };
+                spans.push({ start: e.addr, end, items: [e] });
+            }
+        }
+        const decodeFrom = (e, block) => {
+            if (e.type) {
+                childVals[e.expr] = {};
+                if (block) {
+                    const want = Math.min(e.bytes, AGG_READ_CAP);
+                    const needBytes = e.type.cat === 'array' || e.type.cat === 'struct' ? 1 : e.bytes;
+                    const d = (0, dwarf_1.decodeByType)(block.subarray(0, Math.min(block.length, e.bytes)), e.type);
+                    results[e.expr] = {
+                        hex: d.hex,
+                        value: d.value,
+                        ok: block.length >= Math.min(needBytes, want),
+                        bytes: e.bytes,
+                        addr: e.addr,
+                    };
+                    if (e.expanded && e.children) {
+                        (0, dwarf_1.decodeTypedSubtree)(block, e.addr, e.children, childVals[e.expr]);
+                    }
+                }
+                else {
+                    results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr, value: '' };
+                }
+                return;
+            }
+            if (block && block.length > 0) {
+                results[e.expr] = {
+                    hex: (0, dapHelpers_2.toHexLE)(block, e.bytes * 8),
+                    value: (0, typed_1.decodeTyped)(block, e.kind),
+                    ok: true,
+                    bytes: e.bytes,
+                    addr: e.addr ?? 0,
+                };
+            }
+            else {
+                results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr ?? 0, value: '' };
             }
         };
-        await Promise.all(this.entries.filter((e) => e.type && e.addr !== undefined).map((e) => readTyped(e)));
-        // ---- 旧通路（memRef / 无类型地址 / DAP 捕获子节点） ----
+        await Promise.all(spans.map(async (sp) => {
+            const buf = await (0, dapHelpers_1.readBlock)(s, sp.start, sp.end - sp.start);
+            for (const e of sp.items) {
+                decodeFrom(e, buf ? buf.subarray(e.addr - sp.start) : undefined);
+            }
+        }));
+        // ---- memRef 通路（断点捕获的局部变量句柄，无法按地址合并，逐个读） ----
         const readOne = async (e) => {
-            const ref = e.memRef ?? (e.addr !== undefined ? `0x${e.addr.toString(16)}` : undefined);
-            if (!ref) {
+            if (!e.memRef) {
                 return;
             }
             try {
                 const r = (await s.customRequest('readMemory', {
-                    memoryReference: ref,
+                    memoryReference: e.memRef,
                     count: e.bytes,
                 }));
                 const buf = Buffer.from(r?.data ?? '', 'base64');
@@ -821,13 +1015,11 @@ class WatchViewProvider {
                 }
             }
             catch {
-                // 目标运行中不可读（cortex-debug）
+                // 读取失败（探针瞬断等）：该条目本轮显示 …
             }
             results[e.expr] = { hex: '…', ok: false, bytes: e.bytes, addr: e.addr ?? 0, value: '' };
         };
-        await Promise.all(this.entries
-            .filter((e) => !e.type && (e.addr !== undefined || e.memRef))
-            .map((e) => readOne(e)));
+        await Promise.all(this.entries.filter((e) => !e.type && e.memRef).map((e) => readOne(e)));
         // 展开条目的子节点（DAP 捕获路径）：数组按基址整块读后切片；独立 memRef 逐个读
         for (const e of this.entries) {
             if (e.type || !e.expanded || !e.children || e.children.length === 0) {
@@ -877,6 +1069,69 @@ class WatchViewProvider {
                 }));
             }
         }
+        // ---- 指针解引用：目标地址 = 父指针的运行时值（旁路读，零停机） ----
+        const derefTarget = async (addr, dc, out) => {
+            if (!Number.isFinite(addr) || addr <= 0) {
+                out[dc.path] = { value: addr === 0 ? 'NULL' : '…', ok: addr === 0 };
+                return;
+            }
+            const t = dc.type;
+            const charish = !!t && t.cat === 'scalar' && (t.kind === 'u8' || t.kind === 'i8');
+            const want = charish ? 128 : Math.min(Math.max(4, dc.bytes), AGG_READ_CAP);
+            const buf = await (0, dapHelpers_1.readBlock)(s, addr, want);
+            if (!buf) {
+                out[dc.path] = { value: '…', ok: false };
+                return;
+            }
+            if (charish) {
+                // char*：NUL 截止字符串（不可打印字节转 \xNN）
+                let str = '';
+                for (const b of buf) {
+                    if (b === 0) {
+                        break;
+                    }
+                    str += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0');
+                }
+                out[dc.path] = { value: '"' + (str.length > 96 ? str.slice(0, 96) + '…' : str) + '"', ok: true };
+                return;
+            }
+            const d = (0, dwarf_1.decodeByType)(buf, t);
+            out[dc.path] = { hex: d.hex, value: d.value, ok: true };
+            // deref 节点再展开（结构体成员/数组元素）：子树按偏移物化，以 0 为基解码
+            if (dc.expanded && dc.children) {
+                (0, dwarf_1.decodeTypedSubtree)(buf, 0, dc.children, out);
+            }
+        };
+        const derefWalk = async (out, nodes) => {
+            for (const c of nodes ?? []) {
+                if (c.type?.cat === 'ptr' && c.expanded && c.children) {
+                    const dc = c.children.find((x) => x.deref);
+                    const pv = out[c.path];
+                    if (dc && pv) {
+                        const addr = parseInt((pv.hex || pv.value || '0').replace(/^0x/i, ''), 16) || 0;
+                        await derefTarget(addr, dc, out);
+                    }
+                }
+                if (c.children) {
+                    await derefWalk(out, c.children);
+                }
+            }
+        };
+        for (const e of this.entries) {
+            const out = (childVals[e.expr] = childVals[e.expr] ?? {});
+            if (e.type?.cat === 'ptr' && e.expanded && e.children) {
+                const dc = e.children.find((x) => x.deref);
+                const rv = results[e.expr];
+                if (dc) {
+                    const addr = parseInt((rv?.hex || rv?.value || '0').replace(/^0x/i, ''), 16) || 0;
+                    await derefTarget(addr, dc, out);
+                }
+                await derefWalk(out, dc?.children);
+            }
+            else {
+                await derefWalk(out, e.children);
+            }
+        }
         // 未解析：优先 ELF 符号表（离线、零停顿、双引擎通用）
         const unresolved = this.entries.filter((e) => e.addr === undefined && !e.memRef && e.resolveFailed !== true);
         if (unresolved.length > 0) {
@@ -914,31 +1169,6 @@ class WatchViewProvider {
                     };
                 }
             }));
-        }
-        if (unresolved.length > 0 && !nonIntrusive) {
-            // cortex-debug：微停机窗口 evaluate 解析（上限 3 次）
-            const stillUnresolved = this.entries.filter((e) => e.addr === undefined && !e.memRef && !e.resolveFailed && (e.resolveTries ?? 0) < 3);
-            if (stillUnresolved.length > 0 && Date.now() - this.lastProbeSample > 2_000) {
-                this.lastProbeSample = Date.now();
-                this.deps.log('变量监控: 运行中无法解析符号，微停机一次完成解析（之后纯旁路读取）');
-                await (0, dapHelpers_1.sampleWhileRunning)(s, this.deps.log, async () => {
-                    await Promise.all(stillUnresolved.map(async (e) => {
-                        await this.resolveEntry(s, e, true);
-                        if (e.addr !== undefined) {
-                            const buf = await (0, dapHelpers_1.readBlock)(s, e.addr, e.bytes);
-                            if (buf) {
-                                results[e.expr] = {
-                                    hex: (0, dapHelpers_2.toHexLE)(buf, e.bytes * 8),
-                                    value: (0, typed_1.decodeTyped)(buf, e.kind),
-                                    ok: true,
-                                    bytes: e.bytes,
-                                    addr: e.addr,
-                                };
-                            }
-                        }
-                    }));
-                });
-            }
         }
         const payload = JSON.stringify([results, childVals]);
         if (payload !== this.lastValuesJson) {
@@ -1037,16 +1267,14 @@ class WatchViewProvider {
       .child .name { padding-left: 16px; font-weight: 400; opacity: .92; }
       .child2 .name { padding-left: 34px; font-weight: 400; opacity: .85; }
       .child3 .name { padding-left: 52px; font-weight: 400; opacity: .78; }
-      .dotk { display: inline-block; width: 7px; height: 7px; border-radius: 2px;
-        margin: 0 6px 0 2px; vertical-align: 0; }
-      .dotk.scalar { background: var(--ac); }
-      .dotk.float { background: var(--fl); }
-      .dotk.enum { background: var(--en); }
-      .dotk.ptr { background: var(--pt); }
-      .dotk.bool { background: var(--ok); }
-      .dotk.array { background: #ce9178; }
-      .dotk.struct { background: #dcdcaa; }
-      .dotk.other { background: var(--vscode-descriptionForeground); }
+      .nk.scalar { color: var(--ac); }
+      .nk.float { color: var(--fl); }
+      .nk.enum { color: var(--en); }
+      .nk.ptr { color: var(--pt); }
+      .nk.bool { color: var(--ok); }
+      .nk.array { color: #ce9178; }
+      .nk.struct { color: #dcdcaa; }
+      .nk.other { color: var(--vscode-symbolIcon-variableForeground, #9cdcfe); }
       .ty { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px;
         color: var(--vscode-descriptionForeground); }
       .val { font-family: var(--vscode-editor-font-family, monospace); font-size: 13px;
@@ -1056,6 +1284,7 @@ class WatchViewProvider {
       .val.pt { color: var(--pt); }
       .val.bo.true { color: var(--ok); }
       .val.bo.false { color: var(--vscode-descriptionForeground); }
+      .val.err { color: #f14c4c; font-weight: 600; }
       .val.stale { color: var(--vscode-descriptionForeground); font-weight: 400; }
       .ad { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px;
         color: var(--vscode-descriptionForeground); }
@@ -1101,6 +1330,7 @@ class WatchViewProvider {
         <div class="ctxi" data-f="auto"><span class="mk">○</span>自动（跟随面板）</div>
         <div class="ctxi" data-f="dec"><span class="mk">10</span>十进制</div>
         <div class="ctxi" data-f="hex"><span class="mk">16</span>十六进制</div>
+        <div class="ctxi" data-f="multi"><span class="mk">=</span>同时显示（10 = 16）</div>
         <div class="ctxi" data-f="bin"><span class="mk">01</span>二进制</div>
         <div class="ctxi" data-f="char"><span class="mk">A</span>字符</div>
         <div class="ctxs"></div>
@@ -1126,7 +1356,8 @@ class WatchViewProvider {
         function nodeExpandable(n) {
           if (n.children && n.children.length > 0) return true;
           if (n.type) return n.type.cat === 'array' ? n.type.count > 0
-            : n.type.cat === 'struct' ? n.type.members.length > 0 : false;
+            : n.type.cat === 'struct' ? n.type.members.length > 0
+            : n.type.cat === 'ptr' ? !!n.type.elem : false;
           return false;
         }
         function rootExpandable(e) {
@@ -1156,7 +1387,13 @@ class WatchViewProvider {
         function valOf(v, node, f) {
           if (v && v.ok) {
             let text;
-            if (f === 'hex') text = v.hex || v.value || '…';
+            if (f === 'multi') {
+              // 同时显示（dec = 0x hex）：缺其一退回单显（浮点/布尔通常只有十进制）
+              const d = v.value || '';
+              const h = v.hex || '';
+              text = (d && h) ? (d + ' = ' + h) : (d || h || '…');
+            }
+            else if (f === 'hex') text = v.hex || v.value || '…';
             else if (f === 'bin') text = hexToBin(v.hex) || v.value || '…';
             else if (f === 'char') {
               // 字符显示：按低字节取 ASCII，可打印显示 'X'，否则回落十进制
@@ -1167,6 +1404,9 @@ class WatchViewProvider {
             }
             else text = (v.value && v.value !== '') ? v.value : (v.hex || '…');
             return { text: text, cls: 'val' + kindSuffix(node, text) };
+          }
+          if (node && node.resolveFailed && node.addr === undefined && !node.memRef) {
+            return { text: '不在 ELF 中', cls: 'val err' };
           }
           if (node && node.capturedValue) return { text: node.capturedValue, cls: 'val stale' };
           return { text: '…', cls: 'val stale' };
@@ -1187,22 +1427,27 @@ class WatchViewProvider {
           return '<span class="caret' + (expanded ? ' open' : '') + '" data-x="' + esc(expr) +
             '" data-p="' + esc(path || '') + '">▶</span>';
         }
-        /** 类型小色标（根行名称前，一眼区分标量/数组/结构体/指针…） */
-        function kindDot(n) {
+        /** 名称着色的类型分类（标量/浮点/枚举/指针/布尔/数组/结构体） */
+        function kindOf(n) {
           const t = n && n.type;
-          let k = 'other';
-          if (t) {
-            k = t.cat === 'array' ? 'array' : t.cat === 'struct' ? 'struct'
-              : t.cat === 'ptr' ? 'ptr' : t.cat === 'enum' ? 'enum' : t.cat === 'bool' ? 'bool'
-              : (t.cat === 'scalar' && (t.kind === 'f32' || t.kind === 'f64')) ? 'float' : 'scalar';
+          if (!t) {
+            return 'other';
           }
-          return '<span class="dotk ' + k + '" title="' + (t ? t.label : '') + '"></span>';
+          if (t.cat === 'array') return 'array';
+          if (t.cat === 'struct') return 'struct';
+          if (t.cat === 'ptr') return 'ptr';
+          if (t.cat === 'enum') return 'enum';
+          if (t.cat === 'bool') return 'bool';
+          if (t.cat === 'scalar' && (t.kind === 'f32' || t.kind === 'f64')) return 'float';
+          return 'scalar';
         }
         const HIDDEN_CARET = '<span class="caret" style="visibility:hidden">▶</span>';
-        function rowHtml(cls, expr, path, name, caret, typeLabel, tip, isRoot, dot) {
+        function rowHtml(cls, expr, path, name, caret, typeLabel, tip, isRoot, node) {
+          const kt = node && node.type && node.type.label ? ' title="' + esc(node.type.label) + '"' : '';
           return '<tr class="' + cls + '" data-e="' + esc(expr) + '" data-p="' + esc(path || '') + '"' +
             (isRoot ? ' data-root="1"' : '') + '>' +
-            '<td class="name"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + caret + (dot || '') + esc(name) + '</td>' +
+            '<td class="name"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + caret +
+            '<span class="nk ' + kindOf(node) + '"' + kt + '>' + esc(name) + '</span></td>' +
             '<td class="ty">' + esc(typeLabel) + '</td>' +
             '<td class="val" data-vk="' + esc(rowKey(expr, path)) + '">…</td>' +
             '<td class="ad" data-ak="' + esc(rowKey(expr, path)) + '">…</td>' +
@@ -1215,7 +1460,7 @@ class WatchViewProvider {
           let h = '';
           for (const c of children) {
             const caret = nodeExpandable(c) ? caretHtml(e.expr, c.path || '', c.expanded) : HIDDEN_CARET;
-            h += rowHtml(cls, e.expr, c.path || c.name, c.name, caret, c.typeLabel, '', false);
+            h += rowHtml(cls, e.expr, c.path || c.name, c.name, caret, c.typeLabel, '', false, c);
             if (c.expanded && c.children && c.children.length > 0) {
               h += childRowsHtml(e, c.children, depth + 1);
             }
@@ -1247,7 +1492,7 @@ class WatchViewProvider {
             const tip = [e.srcFile ? '文件: ' + e.srcFile : '',
                          e.scope !== undefined && e.scope !== null ? '作用域: ' + (e.scope === '' ? '文件级 static' : e.scope + '()') : ''].filter(Boolean).join('\\n');
             const caret = rootExpandable(e) ? caretHtml(e.expr, '', e.expanded) : '';
-            h += rowHtml('', e.expr, '', e.expr, caret, e.typeLabel, tip, true, kindDot(e));
+            h += rowHtml('', e.expr, '', e.expr, caret, e.typeLabel, tip, true, e);
             if (e.expanded && e.children && e.children.length > 0) {
               h += childRowsHtml(e, e.children, 1);
             }

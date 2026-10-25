@@ -61,10 +61,7 @@ function loadSettings() {
         ninjaPath: cfg.get('ninjaPath', ''),
         armToolchainPath: cfg.get('armToolchainPath', ''),
         programmerCliPath: cfg.get('programmerCliPath', ''),
-        gdbPath: cfg.get('gdbPath', ''),
-        gdbServerPath: cfg.get('gdbServerPath', ''),
         cubemxPath: cfg.get('cubemxPath', ''),
-        debugEngine: cfg.get('debugEngine', 'cortex-debug') === 'probe-rs' ? 'probe-rs' : 'cortex-debug',
         debugRefreshMs: clampNumber(cfg.get('debugRefreshMs', 200), 50, 5000, 200),
         probeRsChip: cfg.get('probeRsChip', ''),
         svdFile: cfg.get('svdFile', ''),
@@ -75,6 +72,7 @@ function loadSettings() {
         resetAfterFlash: reset === 'software' || reset === 'none' ? reset : 'hardware',
         binFlashAddress: cfg.get('binFlashAddress', ''),
         verboseLogging: cfg.get('verboseLogging', false),
+        showCompiledMark: cfg.get('showCompiledMark', true),
         buildTimeoutSec: clampNumber(cfg.get('buildTimeoutSec', 600), 10, 7200, 600),
         flashTimeoutSec: clampNumber(cfg.get('flashTimeoutSec', 300), 10, 3600, 300),
     };

@@ -49,12 +49,8 @@ const TOOL_SHORT = {
     objcopy: 'ObjCopy',
     size: 'Size',
     programmerCli: 'CubeProg',
-    armGdb: 'GDB',
-    stlinkGdbServer: 'GDBServer',
 };
 const CORE_TOOLS = ['cmake', 'ninja', 'armGcc', 'programmerCli'];
-/** 调试组件（可选，缺失不影响编译/烧录） */
-const DEBUG_TOOLS = ['armGdb', 'stlinkGdbServer'];
 class SidebarProvider {
     state;
     _onDidChangeTreeData = new vscode.EventEmitter();
@@ -214,16 +210,6 @@ class SidebarProvider {
                 tooltip: CORE_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
             }));
         }
-        // 调试组件（可选，缺失不影响编译/烧录）
-        const dbgMissing = DEBUG_TOOLS.filter((n) => !tc.tools[n].found);
-        rows.push(this.row(dbgMissing.length === 0
-            ? '调试组件: 就绪（GDB/GDBServer）'
-            : `调试组件: 缺 ${dbgMissing.map((n) => TOOL_SHORT[n]).join('/')}（仅影响调试）`, {
-            icon: dbgMissing.length === 0 ? 'check' : 'info',
-            command: 'autoCmakeFlash.detectEnvironment',
-            commandTitle: '重新检测',
-            tooltip: DEBUG_TOOLS.map((n) => toolTooltip(tc.tools[n], TOOL_SHORT[n])).join('\n\n'),
-        }));
         const st = s.stlink;
         if (!st) {
             rows.push(this.row('ST-LINK: 未检测', {
@@ -355,13 +341,7 @@ class SidebarProvider {
                 icon: 'settings-gear',
                 command: 'autoCmakeFlash.openSettings',
                 commandTitle: '打开配置面板',
-                tooltip: '在交互界面中设置：构建目录/类型/生成器、烧录接口与复位、调试引擎与 GDB 路径、超时等。保存到当前工程的工作区设置。',
-            }),
-            this.row('切换调试引擎', {
-                icon: 'server',
-                command: 'autoCmakeFlash.toggleEngine',
-                commandTitle: '切换调试引擎',
-                tooltip: '在 cortex-debug（停机式）与 probe-rs（旁路直读）之间切换，立即生效。',
+                tooltip: '在交互界面中设置：构建目录/类型/生成器、烧录接口与复位、调试（probe-rs）与超时等。保存到当前工程的工作区设置。',
             }),
         ];
     }

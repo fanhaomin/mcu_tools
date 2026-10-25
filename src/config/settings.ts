@@ -13,14 +13,8 @@ export interface AutoCmakeFlashSettings {
   ninjaPath: string;
   armToolchainPath: string;
   programmerCliPath: string;
-  /** arm-none-eabi-gdb 完整路径（调试用，留空自动检测） */
-  gdbPath: string;
-  /** ST-LINK_gdbserver 完整路径（调试用，留空自动检测） */
-  gdbServerPath: string;
   /** STM32CubeMX.exe 完整路径（打开 .ioc 用，留空自动检测） */
   cubemxPath: string;
-  /** 调试引擎：cortex-debug（停机式）或 probe-rs（旁路直读） */
-  debugEngine: 'cortex-debug' | 'probe-rs';
   /** 调试面板（外设/变量/内存）统一刷新间隔 ms（50-5000） */
   debugRefreshMs: number;
   /** probe-rs 芯片名覆盖（如 STM32F103C8；留空按识别的型号自动推导） */
@@ -34,6 +28,8 @@ export interface AutoCmakeFlashSettings {
   resetAfterFlash: 'hardware' | 'software' | 'none';
   binFlashAddress: string;
   verboseLogging: boolean;
+  /** 编辑器淡绿底标注已编译进固件的源码行 */
+  showCompiledMark: boolean;
   buildTimeoutSec: number;
   flashTimeoutSec: number;
 }
@@ -61,11 +57,7 @@ export function loadSettings(): AutoCmakeFlashSettings {
     ninjaPath: cfg.get<string>('ninjaPath', ''),
     armToolchainPath: cfg.get<string>('armToolchainPath', ''),
     programmerCliPath: cfg.get<string>('programmerCliPath', ''),
-    gdbPath: cfg.get<string>('gdbPath', ''),
-    gdbServerPath: cfg.get<string>('gdbServerPath', ''),
     cubemxPath: cfg.get<string>('cubemxPath', ''),
-    debugEngine:
-      cfg.get<string>('debugEngine', 'cortex-debug') === 'probe-rs' ? 'probe-rs' : 'cortex-debug',
     debugRefreshMs: clampNumber(cfg.get<number>('debugRefreshMs', 200), 50, 5000, 200),
     probeRsChip: cfg.get<string>('probeRsChip', ''),
     svdFile: cfg.get<string>('svdFile', ''),
@@ -77,6 +69,7 @@ export function loadSettings(): AutoCmakeFlashSettings {
       reset === 'software' || reset === 'none' ? reset : ('hardware' as const),
     binFlashAddress: cfg.get<string>('binFlashAddress', ''),
     verboseLogging: cfg.get<boolean>('verboseLogging', false),
+    showCompiledMark: cfg.get<boolean>('showCompiledMark', true),
     buildTimeoutSec: clampNumber(cfg.get<number>('buildTimeoutSec', 600), 10, 7200, 600),
     flashTimeoutSec: clampNumber(cfg.get<number>('flashTimeoutSec', 300), 10, 3600, 300),
   };

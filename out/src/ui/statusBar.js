@@ -48,29 +48,29 @@ class StatusBar {
     constructor() {
         // 状态栏左侧快捷按钮：编译 / 构建类型 / 烧录 / 调试（一键执行，无需打开插件面板）
         this.buildBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 64);
-        this.buildBtn.name = 'Auto CMake Flash 编译';
+        this.buildBtn.name = 'Embedded Debug 编译';
         this.buildBtn.text = '$(zap) 编译';
-        this.buildBtn.tooltip = '编译工程（Auto CMake Flash）';
+        this.buildBtn.tooltip = '编译工程（Embedded Debug）';
         this.buildBtn.command = 'autoCmakeFlash.build';
         // 构建类型按钮（编译与烧录之间）：显示当前类型，点击选择 Debug/Release 等
         this.typeBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 63);
-        this.typeBtn.name = 'Auto CMake Flash 构建类型';
+        this.typeBtn.name = 'Embedded Debug 构建类型';
         this.typeBtn.tooltip = '选择构建类型：不同类型使用独立构建目录（cmake-build-debug / cmake-build-release）';
         this.typeBtn.command = 'autoCmakeFlash.chooseBuildType';
         this.flashBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 62);
-        this.flashBtn.name = 'Auto CMake Flash 烧录';
+        this.flashBtn.name = 'Embedded Debug 烧录';
         this.flashBtn.text = '$(rocket) 烧录';
-        this.flashBtn.tooltip = '编译并烧录到目标芯片（Auto CMake Flash）';
+        this.flashBtn.tooltip = '编译并烧录到目标芯片（Embedded Debug）';
         this.flashBtn.command = 'autoCmakeFlash.buildAndFlash';
         // 调试按钮（烧录右侧）：编译并调试
         this.debugBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 61);
-        this.debugBtn.name = 'Auto CMake Flash 调试';
+        this.debugBtn.name = 'Embedded Debug 调试';
         this.debugBtn.text = '$(debug-alt) 调试';
-        this.debugBtn.tooltip = '编译并调试（Auto CMake Flash）';
+        this.debugBtn.tooltip = '编译并调试（Embedded Debug）';
         this.debugBtn.command = 'autoCmakeFlash.debug';
         // 工程/目标选择按钮（最左）：显示当前工程名与编译目标，点击打开选择下拉框
         this.projectBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 65);
-        this.projectBtn.name = 'Auto CMake Flash 工程/目标';
+        this.projectBtn.name = 'Embedded Debug 工程/目标';
         this.projectBtn.command = 'autoCmakeFlash.chooseProject';
         this.update({ busy: 'none' }, 'Debug');
     }
@@ -84,7 +84,7 @@ class StatusBar {
             state.busy !== 'none'
                 ? '$(sync~spin)'
                 : `$(folder) ${projectName ?? '选择工程'}${state.target ? `·${state.target}` : ''}`;
-        this.projectBtn.tooltip = '选择工程或编译目标（Auto CMake Flash）';
+        this.projectBtn.tooltip = '选择工程或编译目标（Embedded Debug）';
         this.projectBtn.show();
         // 快捷按钮状态与显示
         this.buildBtn.text =

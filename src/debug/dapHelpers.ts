@@ -1,6 +1,6 @@
 /**
- * DAP 访问共享工具：线程获取、微停机采样、内存块读取。
- * 供外设/变量监控/内存视图三个面板复用。
+ * DAP 访问共享工具：会话判定、内存块读取。
+ * 供外设/变量监控/内存视图/调用栈面板复用（probe-rs 引擎，运行中旁路直读）。
  */
 
 import * as vscode from 'vscode';
@@ -10,64 +10,7 @@ export function delay(ms: number): Promise<void> {
 }
 
 export function isEngineSession(s: vscode.DebugSession | undefined): boolean {
-  return !!s && (s.type === 'cortex-debug' || s.type === 'probe-rs-debug');
-}
-
-export async function tryThreadId(s: vscode.DebugSession): Promise<number | undefined> {
-  try {
-    const th = (await s.customRequest('threads')) as { threads?: { id: number }[] };
-    return th?.threads && th.threads.length > 0 ? th.threads[0].id : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * 微停机采样：暂停目标 → 执行 fn → 立即恢复。
- * 仅 cortex-debug 停机式引擎需要（probe-rs 运行中可旁路直读，禁止调用——会导致程序顿挫）。
- */
-export async function sampleWhileRunning(
-  s: vscode.DebugSession,
-  log: (m: string) => void,
-  fn: () => Promise<void>,
-): Promise<boolean> {
-  try {
-    const pre = await tryThreadId(s);
-    await s.customRequest('pause', pre !== undefined ? { threadId: pre } : {});
-  } catch {
-    return false;
-  }
-  await delay(20);
-  let threadId = await tryThreadId(s);
-  if (threadId === undefined) {
-    await delay(100);
-    threadId = await tryThreadId(s);
-  }
-  let ok = true;
-  try {
-    await fn();
-  } catch {
-    ok = false;
-  }
-  if (threadId === undefined) {
-    log('微停机采样: 无法获取线程 ID，目标保持暂停 — 请手动点继续（F5）');
-    return ok;
-  }
-  try {
-    await s.customRequest('continue', { threadId });
-  } catch {
-    await delay(60);
-    const tid2 = await tryThreadId(s);
-    try {
-      if (tid2 === undefined) {
-        throw new Error('未获取到线程');
-      }
-      await s.customRequest('continue', { threadId: tid2 });
-    } catch (e2) {
-      log(`微停机采样: 恢复运行失败，目标保持暂停 — 请手动点继续（F5）— ${e2 instanceof Error ? e2.message : String(e2)}`);
-    }
-  }
-  return ok;
+  return !!s && s.type === 'probe-rs-debug';
 }
 
 /** 读一块内存（失败返回 undefined，含目标运行中/探针瞬断） */

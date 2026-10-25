@@ -1,5 +1,5 @@
 /**
- * Auto CMake Flash — 扩展入口。
+ * Embedded Debug — 扩展入口。
  *
  * 职责：装配各模块、注册命令、维护会话状态与并发控制。
  * 核心逻辑全部在 src/detection、src/cmake、src/flash 中（不依赖 vscode），
@@ -48,14 +48,13 @@ import { buildProject, isConfigured } from './cmake/build';
 import { Stm32CubeProgrammerCli } from './flash/stm32CubeProgrammer';
 import { FlashConfirmInfo, performFlash } from './flash/programmer';
 import {
-  CORTEX_DEBUG_EXTENSION_ID,
   PROBE_RS_EXTENSION_ID,
-  buildCortexDebugLaunch,
   buildProbeRsLaunch,
   deriveProbeRsChip,
   isDebuggableBuildType,
   parseBuildTypeFromCMakeCache,
 } from './debug/debugConfig';
+import { killOrphanProbeHolders } from './debug/probeCleanup';
 import { AutoCmakeFlashSettings, loadSettings, onSettingsChange } from './config/settings';
 import { SidebarProvider, flashStatusText, verifyText } from './ui/sidebar';
 import { StatusBar } from './ui/statusBar';
@@ -65,6 +64,8 @@ import { cleanupLegacyDeadKeys, updateWorkspaceSetting } from './config/workspac
 import { WatchViewProvider } from './ui/watchView';
 import { ChartViewProvider } from './ui/chartView';
 import { MemViewProvider } from './ui/memView';
+import { CallStackViewProvider } from './ui/callStackView';
+import { DisasmViewProvider } from './ui/disasmView';
 import {
   chooseMcuDialog,
   confirmCleanDialog,
@@ -80,18 +81,18 @@ export function activate(context: vscode.ExtensionContext): void {
     // 激活异常兜底：不能因插件错误拖垮 VS Code
     const msg = e instanceof Error ? (e.stack ?? e.message) : String(e);
     try {
-      const ch = vscode.window.createOutputChannel('Auto CMake Flash');
+      const ch = vscode.window.createOutputChannel('Embedded Debug');
       ch.appendLine(`[FATAL] 扩展激活失败:\n${msg}`);
       ch.show();
     } catch {
       /* ignore */
     }
-    void vscode.window.showErrorMessage('Auto CMake Flash 扩展激活失败，详情见输出面板 "Auto CMake Flash"。');
+    void vscode.window.showErrorMessage('Embedded Debug 扩展激活失败，详情见输出面板 "Embedded Debug"。');
   }
 }
 
 function init(context: vscode.ExtensionContext): void {
-  const channel = vscode.window.createOutputChannel('Auto CMake Flash');
+  const channel = vscode.window.createOutputChannel('Embedded Debug');
   context.subscriptions.push(channel);
 
   let settings: AutoCmakeFlashSettings = loadSettings();
@@ -107,7 +108,7 @@ function init(context: vscode.ExtensionContext): void {
   const status = new StatusBar();
   context.subscriptions.push(status);
 
-  const diagnostics = vscode.languages.createDiagnosticCollection('Auto CMake Flash');
+  const diagnostics = vscode.languages.createDiagnosticCollection('Embedded Debug');
   context.subscriptions.push(diagnostics);
 
   let cancelSource: vscode.CancellationTokenSource | undefined;
@@ -182,7 +183,7 @@ function init(context: vscode.ExtensionContext): void {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
       void vscode.window.showInformationMessage(
-        'Auto CMake Flash: 请先打开包含 STM32 工程的文件夹（文件 → 打开文件夹）。',
+        'Embedded Debug: 请先打开包含 STM32 工程的文件夹（文件 → 打开文件夹）。',
       );
       return undefined;
     }
@@ -211,7 +212,7 @@ function init(context: vscode.ExtensionContext): void {
         description: f.uri.fsPath,
         fsPath: f.uri.fsPath,
       })),
-      { title: 'Auto CMake Flash — 选择要操作的工程目录', ignoreFocusOut: true },
+      { title: 'Embedded Debug — 选择要操作的工程目录', ignoreFocusOut: true },
     );
     state.root = pick?.fsPath;
     return state.root;
@@ -304,7 +305,7 @@ function init(context: vscode.ExtensionContext): void {
               ? '调试'
               : '配置';
       void vscode.window.showWarningMessage(
-        `Auto CMake Flash: 已有${label}任务正在进行，请等待其完成后再试。`,
+        `Embedded Debug: 已有${label}任务正在进行，请等待其完成后再试。`,
       );
       return undefined;
     }
@@ -315,7 +316,7 @@ function init(context: vscode.ExtensionContext): void {
       return await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: `Auto CMake Flash: ${title}`,
+          title: `Embedded Debug: ${title}`,
           cancellable,
         },
         async (_progress, token) => fn(token),
@@ -323,7 +324,7 @@ function init(context: vscode.ExtensionContext): void {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.error(`任务 "${title}" 异常: ${msg}`);
-      void vscode.window.showErrorMessage(`Auto CMake Flash: ${title}失败 — ${msg}`);
+      void vscode.window.showErrorMessage(`Embedded Debug: ${title}失败 — ${msg}`);
       return undefined;
     } finally {
       state.busy = 'none';
@@ -392,7 +393,7 @@ function init(context: vscode.ExtensionContext): void {
         parts.push(project.mcu.warnings[0]);
       }
       void vscode.window.showInformationMessage(
-        `Auto CMake Flash 扫描完成 — ${parts.join('；')}`,
+        `Embedded Debug 扫描完成 — ${parts.join('；')}`,
         '手动选择型号',
       ).then((pick) => {
         if (pick === '手动选择型号') {
@@ -412,8 +413,6 @@ function init(context: vscode.ExtensionContext): void {
         ninja: settings.ninjaPath || undefined,
         armGcc: settings.armToolchainPath || undefined,
         programmerCli: settings.programmerCliPath || undefined,
-        armGdb: settings.gdbPath || undefined,
-        stlinkGdbServer: settings.gdbServerPath || undefined,
       },
       timeoutMs: 15_000,
     });
@@ -452,15 +451,15 @@ function init(context: vscode.ExtensionContext): void {
       const total = Object.keys(toolchain.tools).length;
       if (toolchain.complete && state.stlink?.status === 'probeDetected') {
         void vscode.window.showInformationMessage(
-          `Auto CMake Flash: 环境检测完成（${found}/${total} 组件就绪，ST-LINK 已检测到）。`,
+          `Embedded Debug: 环境检测完成（${found}/${total} 组件就绪，ST-LINK 已检测到）。`,
         );
       } else if (toolchain.complete) {
         void vscode.window.showInformationMessage(
-          `Auto CMake Flash: 工具链完整（${found}/${total}），但未检测到 ST-LINK 适配器（烧录前会再次检测）。`,
+          `Embedded Debug: 工具链完整（${found}/${total}），但未检测到 ST-LINK 适配器（烧录前会再次检测）。`,
         );
       } else {
         void vscode.window.showWarningMessage(
-          `Auto CMake Flash: 缺少 ${toolchain.missing.length} 个工具链组件，详见侧边栏与日志。`,
+          `Embedded Debug: 缺少 ${toolchain.missing.length} 个工具链组件，详见侧边栏与日志。`,
           '查看解决方法',
         ).then((pick) => {
           if (pick === '查看解决方法') {
@@ -488,7 +487,7 @@ function init(context: vscode.ExtensionContext): void {
       if (project.hasIoc) {
         void vscode.window
           .showWarningMessage(
-            'Auto CMake Flash: 工程包含 STM32CubeMX .ioc 文件但没有 CMakeLists.txt。\n' +
+            'Embedded Debug: 工程包含 STM32CubeMX .ioc 文件但没有 CMakeLists.txt。\n' +
               '请使用 STM32CubeMX → Project Manager → Toolchain/IDE 选择 "CMake" 重新生成工程（插件第一版不自行生成 CubeMX 工程）。',
             '重新扫描',
           )
@@ -499,18 +498,18 @@ function init(context: vscode.ExtensionContext): void {
           });
       } else {
         void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 未找到 CMakeLists.txt，无法进行 CMake 配置。',
+          'Embedded Debug: 未找到 CMakeLists.txt，无法进行 CMake 配置。',
         );
       }
       return false;
     }
     if (!tc) {
-      void vscode.window.showErrorMessage('Auto CMake Flash: 开发环境未就绪（CMake 未检测到）。请先执行“检测开发环境”。');
+      void vscode.window.showErrorMessage('Embedded Debug: 开发环境未就绪（CMake 未检测到）。请先执行“检测开发环境”。');
       return false;
     }
     if (!tc.tools.cmake.found || !tc.tools.cmake.path) {
       void vscode.window.showErrorMessage(
-        'Auto CMake Flash: 未找到 CMake。请安装 STM32CubeCLT 或在设置中指定 cmake 路径。',
+        'Embedded Debug: 未找到 CMake。请安装 STM32CubeCLT 或在设置中指定 cmake 路径。',
       );
       return false;
     }
@@ -519,7 +518,7 @@ function init(context: vscode.ExtensionContext): void {
     let generator = settings.generator;
     if (/^ninja$/i.test(generator) && !tc.tools.ninja.found) {
       const pick = await vscode.window.showWarningMessage(
-        'Auto CMake Flash: Ninja 未检测到。',
+        'Embedded Debug: Ninja 未检测到。',
         { modal: true, detail: '可以安装 STM32CubeCLT（自带 Ninja），或改用其他已安装的生成器。' },
         { title: '改用 MinGW Makefiles', value: 'MinGW Makefiles' },
         { title: '改用 NMake Makefiles', value: 'NMake Makefiles' },
@@ -572,7 +571,7 @@ function init(context: vscode.ExtensionContext): void {
           '工程无工具链配置且未检测到 ARM GCC。将尝试直接配置；若 CMakeLists 未设置编译器，配置会失败。',
         );
         void vscode.window.showWarningMessage(
-          'Auto CMake Flash: 未检测到 ARM GCC 工具链，且工程没有自带工具链配置。CMake 配置可能失败，建议先安装 STM32CubeCLT。',
+          'Embedded Debug: 未检测到 ARM GCC 工具链，且工程没有自带工具链配置。CMake 配置可能失败，建议先安装 STM32CubeCLT。',
         );
       }
     }
@@ -625,7 +624,7 @@ function init(context: vscode.ExtensionContext): void {
       const gppPath = tc.tools.armGpp.found ? tc.tools.armGpp.path : undefined;
       if ((compilerMissing || needsTryCompileFix) && gccPath && gppPath) {
         const pick = await vscode.window.showWarningMessage(
-          'Auto CMake Flash: CMake 配置失败（交叉编译器检查未通过）。',
+          'Embedded Debug: CMake 配置失败（交叉编译器检查未通过）。',
           {
             modal: true,
             detail:
@@ -669,7 +668,7 @@ function init(context: vscode.ExtensionContext): void {
     }
     if (!outcome.ok) {
       void vscode.window.showErrorMessage(
-        `Auto CMake Flash: CMake 配置失败 — ${outcome.reason ?? `退出码 ${outcome.result?.exitCode}，详见日志`}`,
+        `Embedded Debug: CMake 配置失败 — ${outcome.reason ?? `退出码 ${outcome.result?.exitCode}，详见日志`}`,
         '查看日志',
       ).then((pick) => {
         if (pick === '查看日志') {
@@ -679,7 +678,7 @@ function init(context: vscode.ExtensionContext): void {
       return false;
     }
     void vscode.window.showInformationMessage(
-      `Auto CMake Flash: CMake 配置成功（${generator} / ${settings.buildType}）。可以开始编译。`,
+      `Embedded Debug: CMake 配置成功（${generator} / ${settings.buildType}）。可以开始编译。`,
     );
     return true;
   }
@@ -721,14 +720,14 @@ function init(context: vscode.ExtensionContext): void {
     const project = state.project!;
     if (!project.hasCMakeLists) {
       void vscode.window.showErrorMessage(
-        'Auto CMake Flash: 未找到 CMakeLists.txt，无法编译。若是 CubeMX 工程，请先用 STM32CubeMX 生成 CMake 工程。',
+        'Embedded Debug: 未找到 CMakeLists.txt，无法编译。若是 CubeMX 工程，请先用 STM32CubeMX 生成 CMake 工程。',
       );
       return false;
     }
     const okTc = await ensureToolchain(root);
     const tc = state.toolchain;
     if (!tc || !tc.tools.cmake.found || !tc.tools.cmake.path) {
-      void vscode.window.showErrorMessage('Auto CMake Flash: CMake 不可用，无法编译。');
+      void vscode.window.showErrorMessage('Embedded Debug: CMake 不可用，无法编译。');
       return false;
     }
 
@@ -757,13 +756,7 @@ function init(context: vscode.ExtensionContext): void {
       onOutput: (chunk) => channel.append(chunk),
     });
 
-    // 输出已实时流式显示，这里只补一行结果摘要（避免整段重复倒出）
-    log(
-      `退出码: ${outcome.record.exitCode ?? '<无>'}  耗时: ${(outcome.record.durationMs / 1000).toFixed(1)}s` +
-        (outcome.record.timedOut ? '  [超时终止]' : '') +
-        (outcome.record.cancelled ? '  [用户取消]' : '') +
-        (outcome.result.spawnError ? `  [启动失败: ${outcome.result.spawnError}]` : ''),
-    );
+    // 输出已实时流式显示；结果行已由 build.ts 打印（成功）/ 失败摘要（失败），此处不重复
 
     // 诊断写入问题面板
     for (const d of outcome.diagnostics) {
@@ -784,7 +777,7 @@ function init(context: vscode.ExtensionContext): void {
     if (!outcome.ok) {
       void vscode.window
         .showWarningMessage(
-          `Auto CMake Flash: 编译失败（${outcome.record.cancelled ? '已取消' : `退出码 ${outcome.record.exitCode}`}）。已阻止烧录，防止误烧旧固件。`,
+          `Embedded Debug: 编译失败（${outcome.record.cancelled ? '已取消' : `退出码 ${outcome.record.exitCode}`}）。已阻止烧录，防止误烧旧固件。`,
           '查看问题',
           '查看日志',
         )
@@ -798,7 +791,6 @@ function init(context: vscode.ExtensionContext): void {
       return false;
     }
     // 内存占用表已随 ninja 流式输出显示（紧跟各自的目标链接行），结尾不再重复整块
-    log(`构建 已完成（${(outcome.record.durationMs / 1000).toFixed(1)}s）`);
     showLatest(true);
     return true;
   }
@@ -841,7 +833,7 @@ function init(context: vscode.ExtensionContext): void {
       return false;
     }
     const pick = await vscode.window.showWarningMessage(
-      'Auto CMake Flash: 编译失败 —— 缺少 CPU 编译选项。',
+      'Embedded Debug: 编译失败 —— 缺少 CPU 编译选项。',
       {
         modal: true,
         detail:
@@ -925,7 +917,7 @@ function init(context: vscode.ExtensionContext): void {
     const cliInfo = tc?.tools.programmerCli;
     if (!cliInfo?.found || !cliInfo.path) {
       void vscode.window.showErrorMessage(
-        'Auto CMake Flash: 未找到 STM32CubeProgrammer CLI，无法烧录。请安装 STM32CubeCLT 或在设置中指定路径。',
+        'Embedded Debug: 未找到 STM32CubeProgrammer CLI，无法烧录。请安装 STM32CubeCLT 或在设置中指定路径。',
         '查看解决方法',
       ).then((pick) => {
         if (pick === '查看解决方法') {
@@ -991,6 +983,7 @@ function init(context: vscode.ExtensionContext): void {
       confirm: confirmFlashDialog,
       log,
       lastStLink: state.stlink,
+      killOrphanProbeHolders: () => killOrphanProbeHolders('准备烧录', log),
     });
 
     state.lastFlash = outcome;
@@ -1003,12 +996,12 @@ function init(context: vscode.ExtensionContext): void {
         break;
       case 'reset-failed':
         void vscode.window.showWarningMessage(
-          'Auto CMake Flash: 固件已下载并校验通过，但复位命令失败，请手动复位目标。',
+          'Embedded Debug: 固件已下载并校验通过，但复位命令失败，请手动复位目标。',
         );
         break;
       case 'verify-unconfirmed':
         void vscode.window.showWarningMessage(
-          'Auto CMake Flash: 下载命令执行完成，校验状态未确认。请查看日志核对 STM32CubeProgrammer 输出。',
+          'Embedded Debug: 下载命令执行完成，校验状态未确认。请查看日志核对 STM32CubeProgrammer 输出。',
           '查看日志',
         ).then((pick) => {
           if (pick === '查看日志') {
@@ -1017,17 +1010,17 @@ function init(context: vscode.ExtensionContext): void {
         });
         break;
       case 'cancelled':
-        void vscode.window.showInformationMessage('Auto CMake Flash: 已取消烧录。');
+        void vscode.window.showInformationMessage('Embedded Debug: 已取消烧录。');
         break;
       case 'blocked':
         void vscode.window.showWarningMessage(
-          `Auto CMake Flash: 烧录已阻止 — ${outcome.blocker ?? '前置条件不满足'}`,
+          `Embedded Debug: 烧录已阻止 — ${outcome.blocker ?? '前置条件不满足'}`,
         );
         break;
       default:
         void vscode.window
           .showErrorMessage(
-            `Auto CMake Flash: 烧录未成功 — ${flashStatusText(outcome)}（下载: ${outcome.downloaded ? '成功' : '失败'}，校验: ${verifyText(outcome.verify)}）`,
+            `Embedded Debug: 烧录未成功 — ${flashStatusText(outcome)}（下载: ${outcome.downloaded ? '成功' : '失败'}，校验: ${verifyText(outcome.verify)}）`,
             '查看日志',
           )
           .then((pick) => {
@@ -1043,9 +1036,9 @@ function init(context: vscode.ExtensionContext): void {
   // ---------------- 调试 ----------------
 
   /**
-   * 启动调试会话。引擎按设置切换：
-   * - cortex-debug：ST-LINK GDB Server + arm-none-eabi-gdb（停机式）
-   * - probe-rs：直连 DAP，支持运行中读寄存器（Keil 式），面板读取零卡顿
+   * 启动调试会话（仅 probe-rs：直连 DAP，支持运行中读寄存器，面板读取零停机）。
+   * probe-rs 仅负责调试会话；烧录走 CubeProgrammer 链路，烧后不复位保持停机，
+   * 由 probe-rs attach 接管。
    */
   async function doDebugLaunch(
     root: string,
@@ -1053,149 +1046,74 @@ function init(context: vscode.ExtensionContext): void {
     token: vscode.CancellationToken,
   ): Promise<void> {
     await ensureScanned(root);
-    const engine = settings.debugEngine;
 
-    let config: Record<string, unknown>;
-    if (engine === 'probe-rs') {
-      // probe-rs 仅负责调试会话（运行中直读寄存器）；烧录走已验证稳定的
-      // CubeProgrammer 链路，烧后不复位保持停机，由 probe-rs attach 接管
-      if (!(await ensureDebugExtension('probe-rs', PROBE_RS_EXTENSION_ID))) {
-        return;
-      }
-      const project = state.project!;
-      const chip =
-        settings.probeRsChip.trim() ||
-        deriveProbeRsChip(project.mcu.model || project.mcu.base || '');
-      if (!chip) {
-        void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 无法从识别的型号推导 probe-rs 芯片名（需要精确型号如 STM32F103C8）。' +
-            '请执行“手动选择芯片型号”补全，或在设置 autoCmakeFlash.probeRsChip 中直接指定。',
-        );
-        return;
-      }
-      logger.section(request === 'launch' ? '编译并调试 (probe-rs)' : '附加调试 (probe-rs)');
-      // 电压闸门：兼容款 ST-LINK 的电压读数乱跳（0V↔6.3V），probe-rs 读到 0V 直接拒绝
-      // 启动。启动前先试探，读到有效值才放行——把碰运气变成插件自动碰。
-      await probeRsVoltageGate();
-      if (request === 'launch') {
-        // 烧录（CubeProgrammer，不复位）——失败即不进入调试
-        const outcome = await doFlash(root, true, token, { resetOverride: 'none' });
-        if (!outcome || outcome.status !== 'success') {
-          void vscode.window.showErrorMessage(
-            `Auto CMake Flash: 烧录未成功（${outcome ? flashStatusText(outcome) : '已取消'}），已取消进入调试。`,
-            '查看日志',
-          ).then((pick) => {
-            if (pick === '查看日志') {
-              channel.show(true);
-            }
-          });
-          return;
-        }
-      }
-      let elf = state.lastBuild?.elfPath;
-      if (!elf || !existsSync(elf)) {
-        const all = await collectAllArtifacts(root);
-        elf = all.find((a) => a.format === 'elf')?.path;
-      }
-      if (!elf) {
-        void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 未找到 ELF 文件，无法调试（需要带调试信息的 ELF）。请先编译工程。',
-        );
-        return;
-      }
-      config = buildProbeRsLaunch({
-        root,
-        elfPath: elf,
-        chip,
-        interface: settings.downloadInterface,
-        speedKhz: settings.downloadSpeedKhz,
-        svdFile: (svdCache?.file ?? settings.svdFile.trim()) || undefined,
-        request: 'attach',
-      });
-    } else {
-      const okTc = await ensureToolchain(root);
-      const tc = state.toolchain;
-      if (!okTc || !tc) {
-        void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 开发环境未就绪，无法调试。请先执行“检测开发环境”。',
-        );
-        return;
-      }
-      if (!(await ensureDebugExtension('cortex-debug', CORTEX_DEBUG_EXTENSION_ID))) {
-        return;
-      }
-
-      const gdb = tc.tools.armGdb;
-      const gdbServer = tc.tools.stlinkGdbServer;
-      if (!gdb.found || !gdb.path) {
-        void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 未找到 arm-none-eabi-gdb，无法调试。请安装 STM32CubeCLT 或在设置中指定 autoCmakeFlash.gdbPath。',
-          '查看解决方法',
-        ).then((pick) => {
-          if (pick === '查看解决方法') {
-            void vscode.commands.executeCommand('autoCmakeFlash.showMissingTools');
-          }
-        });
-        return;
-      }
-      if (!gdbServer.found || !gdbServer.path) {
-        void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 未找到 ST-LINK_gdbserver，无法调试。它随 STM32CubeProgrammer 一起安装（bin 目录），或在设置 autoCmakeFlash.gdbServerPath 中指定。',
-          '查看解决方法',
-        ).then((pick) => {
-          if (pick === '查看解决方法') {
-            void vscode.commands.executeCommand('autoCmakeFlash.showMissingTools');
-          }
-        });
-        return;
-      }
-
-      let elf = state.lastBuild?.elfPath;
-      if (!elf || !existsSync(elf)) {
-        const all = await collectAllArtifacts(root);
-        elf = all.find((a) => a.format === 'elf')?.path;
-      }
-      if (!elf) {
-        void vscode.window.showErrorMessage(
-          'Auto CMake Flash: 未找到 ELF 文件，无法调试（调试需要带调试信息的 ELF，不支持 HEX/BIN）。请先编译工程。',
-        );
-        return;
-      }
-
-      if (request === 'launch' && !(await confirmDebuggableBuild(root))) {
-        return;
-      }
-
-      const project = state.project!;
-      const device = project.mcu.model || project.mcu.base || 'STM32';
-      config = buildCortexDebugLaunch({
-        root,
-        elfPath: elf,
-        device,
-        interface: settings.downloadInterface,
-        gdbPath: gdb.path,
-        gdbServerPath: gdbServer.path,
-        cubeProgrammerPath: tc.tools.programmerCli.found && tc.tools.programmerCli.path
-          ? path.dirname(tc.tools.programmerCli.path)
-          : undefined,
-        svdFile: settings.svdFile.trim() || undefined,
-        request,
-      });
-      logger.section(request === 'launch' ? '编译并调试' : '附加调试');
-      log(`MCU: ${project.mcu.base || '未知'}，调试配置: ${JSON.stringify(config)}`);
+    if (!(await ensureDebugExtension('Embedded Debug', PROBE_RS_EXTENSION_ID))) {
+      return;
     }
+    const project = state.project!;
+    const chip =
+      settings.probeRsChip.trim() ||
+      deriveProbeRsChip(project.mcu.model || project.mcu.base || '');
+    if (!chip) {
+      void vscode.window.showErrorMessage(
+        'Embedded Debug: 无法从识别的型号推导 probe-rs 芯片名（需要精确型号如 STM32F103C8）。' +
+          '请执行“手动选择芯片型号”补全，或在设置 autoCmakeFlash.probeRsChip 中直接指定。',
+      );
+      return;
+    }
+    logger.section(request === 'launch' ? '编译并调试 (probe-rs)' : '附加调试 (probe-rs)');
+    if (request === 'launch' && !(await confirmDebuggableBuild(root))) {
+      return;
+    }
+    // 电压闸门：兼容款 ST-LINK 的电压读数乱跳（0V↔6.3V），probe-rs 读到 0V 直接拒绝
+    // 启动。启动前先试探，读到有效值才放行——把碰运气变成插件自动碰。
+    await probeRsVoltageGate();
+    if (request === 'launch') {
+      // 烧录（CubeProgrammer，不复位）——失败即不进入调试
+      const outcome = await doFlash(root, true, token, { resetOverride: 'none' });
+      if (!outcome || outcome.status !== 'success') {
+        void vscode.window.showErrorMessage(
+          `Embedded Debug: 烧录未成功（${outcome ? flashStatusText(outcome) : '已取消'}），已取消进入调试。`,
+          '查看日志',
+        ).then((pick) => {
+          if (pick === '查看日志') {
+            channel.show(true);
+          }
+        });
+        return;
+      }
+    }
+    let elf = state.lastBuild?.elfPath;
+    if (!elf || !existsSync(elf)) {
+      const all = await collectAllArtifacts(root);
+      elf = all.find((a) => a.format === 'elf')?.path;
+    }
+    if (!elf) {
+      void vscode.window.showErrorMessage(
+        'Embedded Debug: 未找到 ELF 文件，无法调试（需要带调试信息的 ELF）。请先编译工程。',
+      );
+      return;
+    }
+    const config = buildProbeRsLaunch({
+      root,
+      elfPath: elf,
+      chip,
+      interface: settings.downloadInterface,
+      speedKhz: settings.downloadSpeedKhz,
+      svdFile: (svdCache?.file ?? settings.svdFile.trim()) || undefined,
+      request: 'attach',
+    });
 
     if (state.stlink?.status === 'noProbe') {
       void vscode.window.showWarningMessage(
-        'Auto CMake Flash: 未检测到 ST-LINK 适配器，调试启动可能失败，请检查连接。',
+        'Embedded Debug: 未检测到 ST-LINK 适配器，调试启动可能失败，请检查连接。',
       );
     }
 
     // 会话命名带 工程名+引擎+模式，调试工具栏的会话选择器可区分；
     // 单探针独占：先结束残留的引擎会话，避免同名会话堆积
     config.name =
-      `ACF ${state.project?.name ?? root} · ` +
-      (engine === 'probe-rs' ? 'probe-rs' : 'cortex-debug') +
+      `调试器 ${state.project?.name ?? root} · probe-rs` +
       (request === 'attach' ? ' · 附加' : '');
     for (const st of [...liveSessions]) {
       try {
@@ -1208,6 +1126,9 @@ function init(context: vscode.ExtensionContext): void {
       }
     }
 
+    // 上次异常退出可能留下孤儿 GDB Server 一直占着 ST-LINK，启动前先清掉
+    await killOrphanProbeHolders('准备启动调试', log);
+
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root));
     const started = await vscode.debug.startDebugging(
       folder,
@@ -1215,16 +1136,16 @@ function init(context: vscode.ExtensionContext): void {
     );
     if (!started) {
       void vscode.window.showErrorMessage(
-        'Auto CMake Flash: 调试会话启动失败，请查看调试控制台（DEBUG CONSOLE）与插件日志。',
+        'Embedded Debug: 调试会话启动失败，请查看调试控制台（DEBUG CONSOLE）与插件日志。',
         '查看日志',
       ).then((pick) => {
         if (pick === '查看日志') {
           channel.show(true);
         }
       });
-    } else if (engine === 'probe-rs') {
+    } else {
       void vscode.window.showInformationMessage(
-        'Auto CMake Flash: 已附加到目标（停机状态）。打断点后点调试工具栏的 ⟳ 重启复位，再按 F5 运行到断点。',
+        'Embedded Debug: 已附加到目标（停机状态）。打断点后点调试工具栏的 ⟳ 重启复位，再按 F5 运行到断点。',
       );
     }
   }
@@ -1240,7 +1161,7 @@ function init(context: vscode.ExtensionContext): void {
       return true;
     }
     const pick = await vscode.window.showWarningMessage(
-      `Auto CMake Flash: 当前构建类型为 ${bt}，ELF 可能没有调试信息（断点可能无法命中源码）。`,
+      `Embedded Debug: 当前构建类型为 ${bt}，ELF 可能没有调试信息（断点可能无法命中源码）。`,
       { modal: true, detail: '建议将设置 autoCmakeFlash.buildType 改为 Debug 后重新编译。' },
       { title: '仍要调试', value: 'continue' },
     );
@@ -1280,24 +1201,24 @@ function init(context: vscode.ExtensionContext): void {
       }
     }
     void vscode.window.showWarningMessage(
-      'Auto CMake Flash: 探针电压读数持续异常（兼容款 ST-LINK 常见）。已重试 6 次未放行——请稍后重试调试，或临时切回 cortex-debug 引擎。',
+      'Embedded Debug: 探针电压读数持续异常（兼容款 ST-LINK 常见）。已重试 6 次未放行——请稍后重试调试。',
     );
     return false;
   }
 
-  /** 确保调试引擎扩展已安装（cortex-debug / probe-rs），未装时引导安装 */
+  /** 确保 probe-rs 调试扩展（市场名「Embedded Debug」）已安装，未装时引导安装 */
   async function ensureDebugExtension(
-    engineLabel: string,
+    displayName: string,
     extensionId: string,
   ): Promise<boolean> {
     if (vscode.extensions.getExtension(extensionId)) {
       return true;
     }
     const pick = await vscode.window.showWarningMessage(
-      `Auto CMake Flash: ${engineLabel} 调试引擎需要对应扩展（当前未安装）。`,
+      `Embedded Debug: 调试引擎扩展「${displayName}」未安装。`,
       {
         modal: true,
-        detail: `${extensionId} 提供调试适配层，插件自动生成的调试配置由它执行。是否立即安装？`,
+        detail: `「${displayName}」（${extensionId}）提供调试适配层，插件自动生成的调试配置由它执行。是否立即安装？`,
       },
       { title: '立即安装', value: 'install' },
     );
@@ -1309,20 +1230,20 @@ function init(context: vscode.ExtensionContext): void {
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: `Auto CMake Flash: 正在安装 ${extensionId}...`,
+          title: `Embedded Debug: 正在安装 ${extensionId}...`,
         },
         () =>
           vscode.commands.executeCommand('workbench.extensions.installExtension', extensionId),
       );
     } catch (e) {
       void vscode.window.showErrorMessage(
-        `Auto CMake Flash: ${extensionId} 安装失败 — ${e instanceof Error ? e.message : String(e)}。可在扩展市场手动安装后重试。`,
+        `Embedded Debug: ${extensionId} 安装失败 — ${e instanceof Error ? e.message : String(e)}。可在扩展市场手动安装后重试。`,
       );
       return false;
     }
     if (!vscode.extensions.getExtension(extensionId)) {
       void vscode.window.showErrorMessage(
-        `Auto CMake Flash: ${extensionId} 安装命令已执行但扩展仍不可见，请重启窗口后重试。`,
+        `Embedded Debug: ${extensionId} 安装命令已执行但扩展仍不可见，请重启窗口后重试。`,
       );
       return false;
     }
@@ -1456,7 +1377,9 @@ function init(context: vscode.ExtensionContext): void {
     },
     getInterval: () => settings.debugRefreshMs,
     onEntries: (list) => chart.setEntries(list),
-    onSample: (t, vals) => chart.pushSample(t, vals),
+    onSample: (t, vals) => {
+      chart.pushSample(t, vals);
+    },
   });
   watchRef = watch;
   const mem = new MemViewProvider({
@@ -1464,6 +1387,36 @@ function init(context: vscode.ExtensionContext): void {
     log,
     memento: context.workspaceState,
     getInterval: () => settings.debugRefreshMs,
+  });
+  // 调用栈：目标停机时自动读取；运行中「微停机抓一次」按需触发
+  const callstack = new CallStackViewProvider({
+    getSession: () => engineSession,
+    log,
+  });
+  // 反汇编：源码↔汇编混合视图，停机时按栈顶 PC 定位（objdump 离线解析）
+  const disasm = new DisasmViewProvider({
+    getSession: () => engineSession,
+    getElf: async () => {
+      const p = state.lastBuild?.elfPath;
+      if (p && existsSync(p)) {
+        return p;
+      }
+      const root = state.root;
+      if (!root) {
+        return undefined;
+      }
+      const elfs = (await findArtifacts(buildDirOf(root))).filter((a) => a.format === 'elf');
+      return elfs[0]?.path;
+    },
+    getObjdump: () => {
+      const g = state.toolchain?.tools.armGcc;
+      if (!g?.found || !g.path) {
+        return undefined;
+      }
+      const od = path.join(path.dirname(g.path), process.platform === 'win32' ? 'arm-none-eabi-objdump.exe' : 'arm-none-eabi-objdump');
+      return existsSync(od) ? od : undefined;
+    },
+    log,
   });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(WatchViewProvider.viewType, watch, {
@@ -1475,6 +1428,12 @@ function init(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(MemViewProvider.viewType, mem, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
+    vscode.window.registerWebviewViewProvider(CallStackViewProvider.viewType, callstack, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerWebviewViewProvider(DisasmViewProvider.viewType, disasm, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
   );
 
   // 断点捕获：目标暂停时从变量作用域按名捕获监控条目的内存引用
@@ -1482,8 +1441,17 @@ function init(context: vscode.ExtensionContext): void {
     createDebugAdapterTracker(session: vscode.DebugSession) {
       return {
         onDidSendMessage: (m: { type?: string; event?: string }) => {
-          if (m.type === 'event' && m.event === 'stopped' && isEngineSession(session)) {
-            void watch.onTargetStopped(session);
+          if (m.type === 'event' && (m.event === 'stopped' || m.event === 'continued')) {
+            if (isEngineSession(session)) {
+              if (m.event === 'stopped') {
+                void watch.onTargetStopped(session);
+                callstack.onDebugEvent('stopped');
+                disasm.onDebugEvent('stopped');
+              } else {
+                callstack.onDebugEvent('continued');
+                disasm.onDebugEvent('continued');
+              }
+            }
           }
         },
       };
@@ -1491,11 +1459,63 @@ function init(context: vscode.ExtensionContext): void {
   };
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterTrackerFactory('probe-rs-debug', stopTrackerFactory),
-    vscode.debug.registerDebugAdapterTrackerFactory('cortex-debug', stopTrackerFactory),
   );
 
   const isEngineSession = (s: vscode.DebugSession): boolean =>
-    s.type === 'cortex-debug' || s.type === 'probe-rs-debug';
+    s.type === 'probe-rs-debug';
+
+  // 编辑器光标 → 反汇编联动（去抖 150ms；kind=command 的程序化跳转忽略，防回环）
+  let disasmFollowTimer: NodeJS.Timeout | undefined;
+  context.subscriptions.push(
+    vscode.window.onDidChangeTextEditorSelection((e) => {
+      if (e.kind === vscode.TextEditorSelectionChangeKind.Command) {
+        return;
+      }
+      const line = e.selections[0]?.active.line;
+      if (line === undefined) {
+        return;
+      }
+      if (disasmFollowTimer) {
+        clearTimeout(disasmFollowTimer);
+      }
+      const file = e.textEditor.document.uri.fsPath;
+      const ln = line + 1;
+      disasmFollowTimer = setTimeout(() => disasm.onEditorCursor(file, ln), 150);
+    }),
+  );
+
+  // 「已编译进固件」标注（设置 showCompiledMark 可关）：C/C++ 编辑器打开/激活时
+  // 淡绿底标出有指令的源码行；关闭时清除已有标注
+  const isCFile = (doc: vscode.TextDocument): boolean =>
+    /^(c|cpp)$/.test(doc.languageId) || /\.(c|h|cpp|hpp)$/i.test(doc.fileName);
+  const decorate = (ed: vscode.TextEditor | undefined): void => {
+    if (!ed || !isCFile(ed.document)) {
+      return;
+    }
+    if (!settings.showCompiledMark) {
+      disasm.clearCompiledMark(ed);
+      return;
+    }
+    void disasm.decorateEditor(ed);
+  };
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(decorate),
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      const ed = vscode.window.visibleTextEditors.find((e) => e.document === doc);
+      if (ed && isCFile(doc)) {
+        decorate(ed);
+      }
+    }),
+    onSettingsChange(() => {
+      // 开关切换即时生效：重标或清除所有可见 C/C++ 编辑器
+      for (const ed of vscode.window.visibleTextEditors) {
+        decorate(ed);
+      }
+    }),
+  );
+  if (vscode.window.activeTextEditor) {
+    decorate(vscode.window.activeTextEditor);
+  }
   if (vscode.debug.activeDebugSession && isEngineSession(vscode.debug.activeDebugSession)) {
     engineSession = vscode.debug.activeDebugSession;
   }
@@ -1511,14 +1531,21 @@ function init(context: vscode.ExtensionContext): void {
         liveSessions.add(s);
         periph.pushSession();
         void refreshPeripheralSvd();
+        // 开调试即反汇编定位：attach 接管时目标处于停机态（烧录后复位停机），
+        // 此刻读栈顶 PC 无需任何额外停机；稍等适配器就绪
+        setTimeout(() => disasm.onDebugEvent('stopped'), 2500);
       }
     }),
     vscode.debug.onDidTerminateDebugSession((s) => {
+      callstack.onSessionEnded();
+      disasm.onSessionEnded();
       liveSessions.delete(s);
       if (engineSession && engineSession.id === s.id) {
         engineSession = undefined;
       }
       periph.pushSession();
+      // 引擎回收子进程需要一点时间；延迟清理孤儿（期间新会话已启动则自动跳过）
+      setTimeout(() => void killOrphanProbeHolders('调试会话结束', log), 1500);
     }),
   );
 
@@ -1561,7 +1588,7 @@ function init(context: vscode.ExtensionContext): void {
         } catch (e) {
           const msg = e instanceof Error ? (e.stack ?? e.message) : String(e);
           logger.error(`命令 ${id} 异常:\n${msg}`);
-          void vscode.window.showErrorMessage(`Auto CMake Flash: 命令执行异常 — ${e instanceof Error ? e.message : String(e)}`);
+          void vscode.window.showErrorMessage(`Embedded Debug: 命令执行异常 — ${e instanceof Error ? e.message : String(e)}`);
         }
       }),
     );
@@ -1598,12 +1625,12 @@ function init(context: vscode.ExtensionContext): void {
     const st = state.stlink;
     if (st.status === 'probeDetected') {
       void vscode.window.showInformationMessage(
-        `Auto CMake Flash: 已检测到 ${st.probeCount} 个 ST-LINK（SN: ${st.probes.map((p) => p.serial ?? '?').join(', ')}）。\n注意: 这表示适配器在线，目标芯片连接状态在烧录预检中确认。`,
+        `Embedded Debug: 已检测到 ${st.probeCount} 个 ST-LINK（SN: ${st.probes.map((p) => p.serial ?? '?').join(', ')}）。\n注意: 这表示适配器在线，目标芯片连接状态在烧录预检中确认。`,
       );
     } else if (st.status === 'noProbe') {
-      void vscode.window.showWarningMessage(`Auto CMake Flash: 未检测到 ST-LINK。\n${st.error ?? ''}`);
+      void vscode.window.showWarningMessage(`Embedded Debug: 未检测到 ST-LINK。\n${st.error ?? ''}`);
     } else {
-      void vscode.window.showWarningMessage(`Auto CMake Flash: ST-LINK 检测结果未知。\n${st.error ?? ''}`);
+      void vscode.window.showWarningMessage(`Embedded Debug: ST-LINK 检测结果未知。\n${st.error ?? ''}`);
     }
     // 检测成功时不再倒出完整原始输出，仅在失败/未知时保留完整记录便于排查
     if (st.status !== 'probeDetected') {
@@ -1704,7 +1731,7 @@ function init(context: vscode.ExtensionContext): void {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
       void vscode.window.showInformationMessage(
-        'Auto CMake Flash: 请先打开包含 STM32 工程的文件夹（文件 → 打开文件夹）。',
+        'Embedded Debug: 请先打开包含 STM32 工程的文件夹（文件 → 打开文件夹）。',
       );
       return;
     }
@@ -1723,12 +1750,12 @@ function init(context: vscode.ExtensionContext): void {
     );
     if (items.length === (state.target ? 1 : 0)) {
       void vscode.window.showInformationMessage(
-        'Auto CMake Flash: 未在工程中找到 CMake 目标（CMakeLists.txt 中的 add_executable / add_custom_target）。',
+        'Embedded Debug: 未在工程中找到 CMake 目标（CMakeLists.txt 中的 add_executable / add_custom_target）。',
       );
       return;
     }
     const pick = await vscode.window.showQuickPick(items, {
-      title: 'Auto CMake Flash',
+      title: 'Embedded Debug',
       placeHolder: '选择编译/烧录目标',
       ignoreFocusOut: true,
     });
@@ -1752,13 +1779,13 @@ function init(context: vscode.ExtensionContext): void {
       return;
     }
     if (state.busy !== 'none') {
-      void vscode.window.showWarningMessage('Auto CMake Flash: 有任务正在进行，无法清理构建目录。');
+      void vscode.window.showWarningMessage('Embedded Debug: 有任务正在进行，无法清理构建目录。');
       return;
     }
     const buildDir = buildDirOf(root);
     const fs = require('fs') as typeof import('fs');
     if (!fs.existsSync(buildDir)) {
-      void vscode.window.showInformationMessage(`Auto CMake Flash: 构建目录不存在（${buildDir}），无需清理。`);
+      void vscode.window.showInformationMessage(`Embedded Debug: 构建目录不存在（${buildDir}），无需清理。`);
       return;
     }
     const persisted = await readPersistedState(buildDir);
@@ -1775,11 +1802,11 @@ function init(context: vscode.ExtensionContext): void {
       state.lastBuild = undefined;
       diagnostics.clear();
       refresh();
-      void vscode.window.showInformationMessage('Auto CMake Flash: 构建目录已清理。');
+      void vscode.window.showInformationMessage('Embedded Debug: 构建目录已清理。');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.error(`清理失败: ${msg}`);
-      void vscode.window.showErrorMessage(`Auto CMake Flash: 清理失败 — ${msg}`);
+      void vscode.window.showErrorMessage(`Embedded Debug: 清理失败 — ${msg}`);
     }
   });
 
@@ -1791,7 +1818,7 @@ function init(context: vscode.ExtensionContext): void {
     const buildDir = buildDirOf(root);
     if (!existsSync(buildDir)) {
       void vscode.window.showInformationMessage(
-        `Auto CMake Flash: 构建目录尚不存在（${buildDir}）。请先执行 CMake 配置。`,
+        `Embedded Debug: 构建目录尚不存在（${buildDir}）。请先执行 CMake 配置。`,
       );
       return;
     }
@@ -1806,7 +1833,7 @@ function init(context: vscode.ExtensionContext): void {
     const all = await collectAllArtifacts(root);
     if (all.length === 0) {
       void vscode.window.showInformationMessage(
-        'Auto CMake Flash: 未找到任何固件产物（.elf/.hex/.bin）。请先成功编译工程。',
+        'Embedded Debug: 未找到任何固件产物（.elf/.hex/.bin）。请先成功编译工程。',
       );
       return;
     }
@@ -1819,7 +1846,7 @@ function init(context: vscode.ExtensionContext): void {
       artifact: a,
     }));
     const pick = await vscode.window.showQuickPick(items, {
-      title: 'Auto CMake Flash — 构建产物（选择后定位文件）',
+      title: 'Embedded Debug — 构建产物（选择后定位文件）',
       ignoreFocusOut: true,
     });
     if (pick) {
@@ -1845,7 +1872,7 @@ function init(context: vscode.ExtensionContext): void {
       elf = all.find((a) => a.format === 'elf')?.path;
     }
     if (!elf) {
-      void vscode.window.showInformationMessage('Auto CMake Flash: 未找到 ELF 文件，请先成功编译工程。');
+      void vscode.window.showInformationMessage('Embedded Debug: 未找到 ELF 文件，请先成功编译工程。');
       return;
     }
     await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(elf));
@@ -1878,7 +1905,7 @@ function init(context: vscode.ExtensionContext): void {
     logger.info(`用户手动确认芯片型号: ${pick} -> ${state.project!.mcu.base} (${state.project!.mcu.macro})`);
     refresh();
     void vscode.window.showInformationMessage(
-      `Auto CMake Flash: 芯片型号已确认为 ${state.project!.mcu.base}（编译宏 ${state.project!.mcu.macro}）。`,
+      `Embedded Debug: 芯片型号已确认为 ${state.project!.mcu.base}（编译宏 ${state.project!.mcu.macro}）。`,
     );
   });
 
@@ -1891,7 +1918,7 @@ function init(context: vscode.ExtensionContext): void {
     const project = state.project!;
     if (!project.hasIoc || !project.iocPath || !existsSync(project.iocPath)) {
       void vscode.window.showInformationMessage(
-        'Auto CMake Flash: 当前工程没有找到 .ioc 文件（不是 CubeMX 生成的工程）。',
+        'Embedded Debug: 当前工程没有找到 .ioc 文件（不是 CubeMX 生成的工程）。',
       );
       return;
     }
@@ -1901,13 +1928,13 @@ function init(context: vscode.ExtensionContext): void {
     const result = await launchIocInCubeMx(iocPath);
     if (result === 'launched') {
       void vscode.window.showInformationMessage(
-        `Auto CMake Flash: 正在用 STM32CubeMX 打开 ${path.basename(iocPath)}...`,
+        `Embedded Debug: 正在用 STM32CubeMX 打开 ${path.basename(iocPath)}...`,
       );
       return;
     }
     if (result === 'notfound') {
       const pick = await vscode.window.showWarningMessage(
-        'Auto CMake Flash: 未找到 STM32CubeMX，无法用 CubeMX 打开 .ioc。',
+        'Embedded Debug: 未找到 STM32CubeMX，无法用 CubeMX 打开 .ioc。',
         {
           modal: true,
           detail:
@@ -1922,7 +1949,7 @@ function init(context: vscode.ExtensionContext): void {
       return;
     }
     void vscode.window.showErrorMessage(
-      'Auto CMake Flash: STM32CubeMX 启动失败。可在设置 autoCmakeFlash.cubemxPath 中核正路径。',
+      'Embedded Debug: STM32CubeMX 启动失败。可在设置 autoCmakeFlash.cubemxPath 中核正路径。',
       '在编辑器中打开',
     ).then((pick) => {
       if (pick === '在编辑器中打开') {
@@ -1946,7 +1973,7 @@ function init(context: vscode.ExtensionContext): void {
           o === 'RelWithDebInfo' ? '优化 + 调试信息（build/RelWithDebInfo）' :
           '最小体积（build/MinSizeRel）',
       })),
-      { title: 'Auto CMake Flash — 选择构建类型', ignoreFocusOut: true },
+      { title: 'Embedded Debug — 选择构建类型', ignoreFocusOut: true },
     );
     if (!pick || pick.label === '$(check) ' + pick.label) {
       return;
@@ -1961,7 +1988,7 @@ function init(context: vscode.ExtensionContext): void {
     const options = [50, 100, 200, 500, 1000];
     const pick = await vscode.window.showQuickPick(
       options.map((o) => ({ label: o === settings.debugRefreshMs ? '✓ ' + o + 'ms' : o + 'ms' })),
-      { title: 'Auto CMake Flash — 调试面板刷新间隔（外设/变量/内存共用）', ignoreFocusOut: true },
+      { title: 'Embedded Debug — 调试面板刷新间隔（外设/变量/内存共用）', ignoreFocusOut: true },
     );
     if (!pick) {
       return;
@@ -1977,16 +2004,22 @@ function init(context: vscode.ExtensionContext): void {
     log('调试面板刷新间隔: ' + ms + 'ms');
   });
 
-  register('autoCmakeFlash.toggleEngine', async () => {
-    const cur = vscode.workspace.getConfiguration('autoCmakeFlash').get<string>('debugEngine', 'cortex-debug');
-    const next = cur === 'probe-rs' ? 'cortex-debug' : 'probe-rs';
-    await updateWorkspaceSetting('debugEngine', next);
-    settings = loadSettings();
-    settings.debugEngine = next; // 直写文件后 Configuration 读取有延迟
-    void vscode.window.showInformationMessage(
-      `Auto CMake Flash: 调试引擎已切换为 ${next === 'probe-rs' ? 'probe-rs（旁路直读，零停机）' : 'cortex-debug（停机式）'}。下次调试生效。`,
+  // 编辑器右键「在反汇编中显示此行」：离线数据，运行中也可浏览
+  register('autoCmakeFlash.showDisasmHere', async () => {
+    const ed = vscode.window.activeTextEditor;
+    if (!ed) {
+      return;
+    }
+    await vscode.commands.executeCommand('autoCmakeFlash.disasm.focus');
+    const ok = await disasm.revealSourceLine(
+      ed.document.uri.fsPath,
+      ed.selection.active.line + 1,
     );
-    refresh();
+    if (!ok) {
+      void vscode.window.showInformationMessage(
+        'Embedded Debug: 当前行的源码没有对应汇编（未编译进 ELF 或该行无指令，如注释/空行）。',
+      );
+    }
   });
 
   register('autoCmakeFlash.openSettings', () => {
@@ -1997,7 +2030,7 @@ function init(context: vscode.ExtensionContext): void {
   register('autoCmakeFlash.addWatchFromEditor', async () => {
     const ed = vscode.window.activeTextEditor;
     if (!ed) {
-      void vscode.window.showWarningMessage('Auto CMake Flash: 没有激活的编辑器。');
+      void vscode.window.showWarningMessage('Embedded Debug: 没有激活的编辑器。');
       return;
     }
     let name = ed.document.getText(ed.selection).trim();
@@ -2009,26 +2042,26 @@ function init(context: vscode.ExtensionContext): void {
     }
     if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       void vscode.window.showWarningMessage(
-        'Auto CMake Flash: 请先在代码中选中一个变量名（或把光标放在变量名上再右键）。',
+        'Embedded Debug: 请先在代码中选中一个变量名（或把光标放在变量名上再右键）。',
       );
       return;
     }
     const r = await watch.addFromEditor(name);
     if (r.status === 'added') {
       void vscode.window.showInformationMessage(
-        `Auto CMake Flash: 已添加 ${name}（${r.var?.type.label} @ 0x${r.var?.addr.toString(16).toUpperCase()}）到变量监控。`,
+        `Embedded Debug: 已添加 ${name}（${r.var?.type.label} @ 0x${r.var?.addr.toString(16).toUpperCase()}）到变量监控。`,
       );
     } else if (r.status === 'exists') {
-      void vscode.window.showInformationMessage(`Auto CMake Flash: ${name} 已在监控列表中。`);
+      void vscode.window.showInformationMessage(`Embedded Debug: ${name} 已在监控列表中。`);
     } else if (r.status === 'full') {
-      void vscode.window.showWarningMessage('Auto CMake Flash: 变量监控条目已满，请先移除部分条目。');
+      void vscode.window.showWarningMessage('Embedded Debug: 变量监控条目已满，请先移除部分条目。');
     } else if (r.status === 'noelf') {
       void vscode.window.showWarningMessage(
-        'Auto CMake Flash: 没有可用的 DWARF 调试信息（先完成一次 Debug 构建，并确认 readelf 工具可用）。',
+        'Embedded Debug: 没有可用的 DWARF 调试信息（先完成一次 Debug 构建，并确认 readelf 工具可用）。',
       );
     } else {
       void vscode.window.showWarningMessage(
-        `Auto CMake Flash: ELF 中未找到变量 ${name}（函数内局部变量请打断点捕获；也可能被编译器优化掉）。`,
+        `Embedded Debug: ELF 中未找到变量 ${name}（函数内局部变量请打断点捕获；也可能被编译器优化掉）。`,
       );
     }
   });
@@ -2040,11 +2073,11 @@ function init(context: vscode.ExtensionContext): void {
   register('autoCmakeFlash.showWarnings', async () => {
     const w = state.project?.warnings ?? [];
     if (w.length === 0) {
-      void vscode.window.showInformationMessage('Auto CMake Flash: 当前没有识别警告。');
+      void vscode.window.showInformationMessage('Embedded Debug: 当前没有识别警告。');
       return;
     }
     await vscode.window.showInformationMessage(
-      `Auto CMake Flash 识别警告:\n\n${w.map((x, i) => `${i + 1}. ${x}`).join('\n')}`,
+      `Embedded Debug 识别警告:\n\n${w.map((x, i) => `${i + 1}. ${x}`).join('\n')}`,
       { modal: true },
     );
   });
@@ -2052,12 +2085,12 @@ function init(context: vscode.ExtensionContext): void {
   register('autoCmakeFlash.showMissingTools', async () => {
     const missing = state.toolchain?.missing ?? [];
     if (missing.length === 0) {
-      void vscode.window.showInformationMessage('Auto CMake Flash: 工具链完整，没有缺失组件。');
+      void vscode.window.showInformationMessage('Embedded Debug: 工具链完整，没有缺失组件。');
       return;
     }
     const advice = missingToolAdvice(missing);
     await vscode.window.showWarningMessage(
-      `Auto CMake Flash 缺少 ${missing.length} 个组件:\n\n${advice.map((a, i) => `${i + 1}. ${a}`).join('\n')}`,
+      `Embedded Debug 缺少 ${missing.length} 个组件:\n\n${advice.map((a, i) => `${i + 1}. ${a}`).join('\n')}`,
       { modal: true },
       '打开设置',
     ).then((pick) => {
@@ -2092,7 +2125,7 @@ function init(context: vscode.ExtensionContext): void {
   }, 2000);
   context.subscriptions.push(new vscode.Disposable(() => clearTimeout(timer)));
 
-  logger.info('Auto CMake Flash 已激活。');
+  logger.info('Embedded Debug 已激活。');
   refresh();
 }
 

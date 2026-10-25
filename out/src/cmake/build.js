@@ -142,7 +142,7 @@ async function buildProject(input) {
         // 用户指定了 CMake 目标（状态栏目标选择）：只构建该目标
         args.push('--target', input.target);
     }
-    log(`开始编译${input.target ? ` 目标 ${input.target}` : ''} (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`);
+    log(`编译${input.target ? ` 目标 ${input.target}` : ''} (模式 ${input.buildType}${cacheInfo.generator ? `, 生成器 ${cacheInfo.generator}` : ''})...`);
     const result = await (0, process_1.execFileSafe)(input.cmakePath, args, {
         cwd: input.root,
         timeoutMs: input.timeoutMs ?? 600_000,
@@ -187,7 +187,7 @@ async function buildProject(input) {
     });
     await saveBuildLog(input.buildDir, record, `${result.stdout}\n${result.stderr}`);
     log(success
-        ? `编译成功，耗时 ${(record.durationMs / 1000).toFixed(1)}s${elfPath ? `，ELF: ${elfPath}` : ''}`
+        ? `编译成功（${(record.durationMs / 1000).toFixed(1)}s）${elfPath ? ` ELF: ${elfPath}` : ''}`
         : `编译失败，退出码 ${result.exitCode}${result.timedOut ? '（超时）' : ''}${result.cancelled ? '（用户取消）' : ''}，共解析出 ${diagnostics.filter((d) => d.severity === 'error').length} 个错误`);
     return { ok: success, record, result, diagnostics, elfPath };
 }
