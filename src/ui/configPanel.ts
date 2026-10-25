@@ -66,6 +66,7 @@ export class ConfigPanel {
           { key: 'downloadSpeedKhz', label: '连接速度 (kHz)', type: 'number' },
           { key: 'resetAfterFlash', label: '烧录后复位', type: 'enum', options: ['hardware', 'software', 'none'] },
           { key: 'binFlashAddress', label: 'BIN 烧录地址', type: 'text', hint: '如 0x08010000，烧 ELF/HEX 时留空' },
+          { key: 'openocdPath', label: 'OpenOCD 路径', type: 'text', hint: 'DAP-Link（CMSIS-DAP）探头烧录用；留空自动取 PATH 中的 openocd' },
         ],
       },
       {

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.134] - 2026-10-25
+
+### Added — DAP-Link（CMSIS-DAP）自动识别烧录（OpenOCD 后端）
+- 无 ST-LINK 时**自动回退**：探测 CMSIS-DAP 探头（OpenOCD `init; targets`），在线即走 OpenOCD 烧录（`program … verify reset exit`），确认窗口标注「CMSIS-DAP (OpenOCD)」；同一次插 DAP-Link 或 ST-LINK 都能烧，无需配置切换。
+- 型号 → target cfg 自动推导（F0–F7 / G0/G4 / H5/H7 / L0–L5 / U5 / WB/WL / C0）；BIN 烧录带地址；校验按输出凭据判定（`verified N bytes`），无法确认如实降级。
+- 新增设置 `autoCmakeFlash.openocdPath`（留空取 PATH 中的 openocd）与配置面板「OpenOCD 路径」项。
+- 调试侧无需改动：probe-rs 原生支持 CMSIS-DAP，启动配置本就自动选探头；J-Link 仍未支持（烧录无后端）。
+- 新增 openocd 模块与 4 个单测（cfg 推导 / 参数形态 / 探测解析 / 校验凭据）。
+
 ## [0.9.133] - 2026-10-25
 
 ### Changed — 名称去掉 STM32 后缀，支持范围移入描述

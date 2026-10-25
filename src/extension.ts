@@ -986,6 +986,8 @@ function init(context: vscode.ExtensionContext): void {
       log,
       lastStLink: state.stlink,
       killOrphanProbeHolders: () => killOrphanProbeHolders('准备烧录', log),
+      openOcdPath: settings.openocdPath.trim() || 'openocd',
+      flashTimeoutSec: settings.flashTimeoutSec,
     });
 
     state.lastFlash = outcome;

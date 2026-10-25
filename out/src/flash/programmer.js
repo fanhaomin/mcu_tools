@@ -54,6 +54,7 @@ exports.describeProbeStatus = describeProbeStatus;
 exports.performFlash = performFlash;
 const path = __importStar(require("path"));
 const verification_1 = require("./verification");
+const openocd_1 = require("./openocd");
 function describeProbeStatus(st) {
     if (!st || st.status === 'notChecked') {
         return '未检查';
@@ -109,8 +110,12 @@ async function performFlash(deps) {
     }
     const artifact = deps.precheck.artifact;
     const binAddress = deps.precheck.binAddress;
-    // 2. CLI 可用性
+    // 2. CLI 可用性——没有 CubeProgrammer 时仍可走 DAP-Link（OpenOCD）路径
     if (!cli || !cli.cliPath) {
+        const dap = await tryFlashViaOpenOcd(deps, artifact, binAddress, messages, '未找到 STM32CubeProgrammer CLI');
+        if (dap) {
+            return dap;
+        }
         const blocker = '未找到 STM32CubeProgrammer CLI，无法烧录。请安装 STM32CubeCLT。';
         log(blocker);
         return { status: 'blocked', downloaded: false, verify: 'skipped', messages: [blocker], blocker };
@@ -137,6 +142,11 @@ async function performFlash(deps) {
         log(`ST-LINK 列表命令原始输出:\n${probeRun.stdout}`);
         const hints = (0, verification_1.stlinkFailureHints)(`${probeRun.stdout}\n${probeRun.stderr}`);
         messages.push('未检测到 ST-LINK 适配器', ...hints);
+        // 自动回退：无 ST-LINK 时尝试 CMSIS-DAP 探头（OpenOCD 烧录）
+        const dap = await tryFlashViaOpenOcd(deps, artifact, binAddress, messages, '未检测到 ST-LINK 适配器');
+        if (dap) {
+            return dap;
+        }
         return {
             status: 'no-probe',
             downloaded: false,
@@ -274,6 +284,118 @@ async function performFlash(deps) {
         verify: 'passed',
         messages,
         exitCode: dlRun.exitCode,
+    };
+}
+/**
+ * DAP-Link（CMSIS-DAP）自动回退烧录：无 ST-LINK 时走 OpenOCD 完整流程
+ * （探测 → 确认窗 → 烧录+校验）。返回 undefined = DAP 路径不可用
+ * （未配置 OpenOCD / 探头不在线 / 型号无法推导 target cfg），调用方回落
+ * 到原 ST-LINK 失败分支，不改变原有阻断语义。
+ */
+async function tryFlashViaOpenOcd(deps, artifact, binAddress, messages, stLinkReason) {
+    const { log, settings } = deps;
+    const openOcdPath = deps.openOcdPath;
+    if (!openOcdPath) {
+        log(`${stLinkReason}；未配置 OpenOCD（autoCmakeFlash.openocdPath），DAP-Link 回退不可用。`);
+        return undefined;
+    }
+    const cfg = (0, openocd_1.openOcdTargetCfg)(deps.mcu.base || deps.mcu.model || '');
+    if (!cfg) {
+        log(`${stLinkReason}；无法从型号推导 OpenOCD target cfg（${deps.mcu.base || deps.mcu.model || '?'}），DAP-Link 回退不可用。`);
+        return undefined;
+    }
+    const ocd = (0, openocd_1.createOpenOcdRunner)(openOcdPath);
+    const timeoutMs = Math.max(30, deps.flashTimeoutSec ?? 300) * 1000;
+    // 探测：CMSIS-DAP 在线且目标可 init
+    log(`ST-LINK 不可用（${stLinkReason}），自动尝试 CMSIS-DAP 探头（OpenOCD）…`);
+    const detRun = await ocd.run((0, openocd_1.openOcdDetectArgs)(cfg, settings.speedKhz), 30_000);
+    const det = (0, openocd_1.parseOpenOcdDetect)(detRun);
+    if (!det.connected) {
+        log(`CMSIS-DAP 探测失败: ${det.error ?? `退出码 ${det.exitCode ?? '?'}`}`);
+        log(`OpenOCD 探测原始输出:\n${det.raw}`);
+        if (det.noProbe) {
+            messages.push('未检测到 CMSIS-DAP 探头（OpenOCD）');
+        }
+        return undefined;
+    }
+    log(`CMSIS-DAP: 探头在线，目标已连接（${cfg}）`);
+    const mcuNote = deps.mcu.confirmedByUser
+        ? '用户手动确认'
+        : `自动识别（可信度: ${deps.mcu.confidence}）`;
+    const info = {
+        workspacePath: deps.workspaceRoot,
+        mcuModel: deps.mcu.base || deps.mcu.family || '待确认',
+        mcuNote,
+        programmer: 'CMSIS-DAP (OpenOCD)',
+        probeStatus: '已检测到 CMSIS-DAP 探头',
+        targetStatus: '已连接（OpenOCD init 成功）',
+        filePath: artifact.path,
+        format: artifact.format.toUpperCase(),
+        binAddress,
+        action: `通过 OpenOCD 将 ${path.basename(artifact.path)} 写入目标` +
+            (binAddress ? `（地址 ${binAddress}）` : '') +
+            '，随后校验' +
+            (settings.resetAfterFlash !== 'none' ? '，完成后复位运行' : '，不复位'),
+        stale: deps.precheck.stale,
+    };
+    if (!(await deps.confirm(info))) {
+        log('用户取消了烧录操作。');
+        return { status: 'cancelled', downloaded: false, verify: 'skipped', messages: ['用户取消操作'] };
+    }
+    const flashRun = await ocd.run((0, openocd_1.openOcdFlashArgs)(artifact.path, binAddress, settings.resetAfterFlash, cfg, settings.speedKhz), timeoutMs);
+    const fl = (0, openocd_1.parseOpenOcdFlash)(flashRun);
+    if (fl.downloaded) {
+        log(`烧录成功: ${path.basename(artifact.path)}（${(artifact.sizeBytes / 1024).toFixed(1)} KB）` +
+            (fl.verify === 'passed'
+                ? '，校验通过'
+                : fl.verify === 'unconfirmed'
+                    ? '，校验状态未确认'
+                    : '，校验失败'));
+    }
+    else {
+        log(`OpenOCD 烧录失败: 退出码 ${flashRun.exitCode ?? '?'}`);
+        log(`OpenOCD 烧录命令: ${flashRun.commandLine ?? openOcdPath}`);
+        log(`OpenOCD 烧录原始输出（失败，完整记录）:\n${fl.raw}`);
+    }
+    const keyLines = fl.raw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => /\*\*|error|verified|wrote \d+/i.test(l))
+        .slice(0, 8);
+    messages.push(...keyLines);
+    if (!fl.downloaded) {
+        return {
+            status: 'download-failed',
+            downloaded: false,
+            verify: 'failed',
+            messages,
+            exitCode: fl.exitCode ?? undefined,
+        };
+    }
+    if (fl.verify === 'failed') {
+        return {
+            status: 'verify-failed',
+            downloaded: true,
+            verify: 'failed',
+            messages,
+            exitCode: fl.exitCode ?? undefined,
+        };
+    }
+    if (fl.verify === 'unconfirmed') {
+        return {
+            status: 'verify-unconfirmed',
+            downloaded: true,
+            verify: 'unconfirmed',
+            messages: [...messages, '下载完成，校验状态未确认。请查看日志核对 OpenOCD 输出。'],
+            exitCode: fl.exitCode ?? undefined,
+        };
+    }
+    return {
+        status: 'success',
+        downloaded: true,
+        verify: 'passed',
+        messages,
+        exitCode: fl.exitCode ?? undefined,
     };
 }
 //# sourceMappingURL=programmer.js.map

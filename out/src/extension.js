@@ -826,6 +826,8 @@ function init(context) {
             log,
             lastStLink: state.stlink,
             killOrphanProbeHolders: () => (0, probeCleanup_1.killOrphanProbeHolders)('准备烧录', log),
+            openOcdPath: settings.openocdPath.trim() || 'openocd',
+            flashTimeoutSec: settings.flashTimeoutSec,
         });
         state.lastFlash = outcome;
         refresh();

@@ -27,6 +27,8 @@ export interface AutoCmakeFlashSettings {
   downloadSpeedKhz: number;
   resetAfterFlash: 'hardware' | 'software' | 'none';
   binFlashAddress: string;
+  /** OpenOCD 可执行路径（DAP-Link/CMSIS-DAP 烧录回退）；留空取 PATH */
+  openocdPath: string;
   verboseLogging: boolean;
   buildTimeoutSec: number;
   flashTimeoutSec: number;
@@ -66,6 +68,7 @@ export function loadSettings(): AutoCmakeFlashSettings {
     resetAfterFlash:
       reset === 'software' || reset === 'none' ? reset : ('hardware' as const),
     binFlashAddress: cfg.get<string>('binFlashAddress', ''),
+    openocdPath: cfg.get<string>('openocdPath', ''),
     verboseLogging: cfg.get<boolean>('verboseLogging', false),
     buildTimeoutSec: clampNumber(cfg.get<number>('buildTimeoutSec', 600), 10, 7200, 600),
     flashTimeoutSec: clampNumber(cfg.get<number>('flashTimeoutSec', 300), 10, 3600, 300),

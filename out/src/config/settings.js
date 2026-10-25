@@ -71,6 +71,7 @@ function loadSettings() {
         downloadSpeedKhz: clampNumber(cfg.get('downloadSpeedKhz', 4000), 100, 24000, 4000),
         resetAfterFlash: reset === 'software' || reset === 'none' ? reset : 'hardware',
         binFlashAddress: cfg.get('binFlashAddress', ''),
+        openocdPath: cfg.get('openocdPath', ''),
         verboseLogging: cfg.get('verboseLogging', false),
         buildTimeoutSec: clampNumber(cfg.get('buildTimeoutSec', 600), 10, 7200, 600),
         flashTimeoutSec: clampNumber(cfg.get('flashTimeoutSec', 300), 10, 3600, 300),

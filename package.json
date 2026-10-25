@@ -2,7 +2,7 @@
   "name": "auto-cmake-flash",
   "displayName": "Embedded Debug",
   "description": "工程识别 · CMake 编译 · ST-LINK 烧录 · 在线调试 · 实时监控（目前仅支持 STM32）",
-  "version": "0.9.133",
+  "version": "0.9.134",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
@@ -392,6 +392,12 @@
           "scope": "resource",
           "default": "",
           "description": "BIN 烧录基地址（如 0x08010000；烧 ELF/HEX 留空）"
+        },
+        "autoCmakeFlash.openocdPath": {
+          "type": "string",
+          "scope": "resource",
+          "default": "",
+          "description": "OpenOCD 路径（DAP-Link/CMSIS-DAP 探头烧录用）；留空取 PATH"
         },
         "autoCmakeFlash.probeRsChip": {
           "type": "string",
