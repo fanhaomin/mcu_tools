@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.123] - 2026-10-25
+
+### Changed — 活动栏/底栏容器图标换芯片图标（PNG）
+- 活动栏与「调试器」底栏容器图标从手绘 SVG 换为 icons8 芯片图标（64×64 PNG，VS Code 自动缩放）。注意：PNG 不随主题着色（深浅色主题下都是图标本色）。
+
 ## [0.9.122] - 2026-10-25
 
 ### Added — 「调试器」底栏标签开调试才显示

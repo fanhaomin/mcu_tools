@@ -2,7 +2,7 @@
   "name": "auto-cmake-flash",
   "displayName": "Embedded Debug (STM32)",
   "description": "STM32 工程自动识别、CMake 配置编译、ST-LINK 烧录、在线调试与实时监控一体化插件（原 Auto CMake Flash；第一版仅支持 STM32）",
-  "version": "0.9.122",
+  "version": "0.9.123",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
@@ -31,14 +31,14 @@
         {
           "id": "auto-cmake-flash",
           "title": "Embedded Debug",
-          "icon": "resources/auto-cmake-flash.svg"
+          "icon": "resources/auto-cmake-flash.png"
         }
       ],
       "panel": [
         {
           "id": "ed-debug-panel",
           "title": "调试器",
-          "icon": "resources/auto-cmake-flash.svg"
+          "icon": "resources/auto-cmake-flash.png"
         }
       ]
     },
