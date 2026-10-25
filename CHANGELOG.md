@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.130] - 2026-10-25
+
+### Changed — 图标换翡翠绿四边引脚芯片
+- 全部图标位置（活动栏 / 底栏容器 / 扩展列表大图标）统一换为翡翠绿四边引脚 IC 图（原图 1267×1241 等比缩至 256 画布居中，约 100KB）。
+
 ## [0.9.129] - 2026-10-25
 
 ### Changed — 图标换对称金色引脚芯片
