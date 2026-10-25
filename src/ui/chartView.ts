@@ -1,10 +1,13 @@
 /**
- * 「波形」WebviewView：变量监控条目的实时曲线（canvas 自绘，零依赖）。
+ * 「波形」WebviewView：变量监控标量条目的实时曲线（canvas 自绘，零依赖）。
+ * 数组矩阵可视化在独立的「数组」面板（arrayView）。
  *
  * 数据来源：变量监控面板每轮刷新的同一批内存读取（数值快照由宿主推送，
  * 不产生额外读取负载）；曲线勾选列表 = 监控条目（仅标量可画），勾选与
- * 时间窗持久化。面板隐藏时停采（与其它面板一致的省电策略）；面板可见
- * 而「变量监控」标签未打开时，由本面板宿主侧定时器驱动监控采样。
+ * 时间窗持久化。曲线支持滚轮缩放（光标锚定）、拖动平移（自动暂停跟随，
+ * 双击回到实时）、悬停读值（十字线 + 数值框）。
+ * 面板隐藏时停采（与其它面板一致的省电策略）；面板可见而「变量监控」标签
+ * 未打开时，由本面板宿主侧定时器驱动监控采样。
  */
 
 import * as vscode from 'vscode';
@@ -99,7 +102,6 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
     void this.view.webview.postMessage({ cmd: 'sample', t, vals });
   }
 
-
   private postEntries(): void {
     void this.view?.webview.postMessage({
       cmd: 'entries',
@@ -131,7 +133,12 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async onMessage(m: { cmd?: string; expr?: string; on?: boolean; s?: number }): Promise<void> {
+  private async onMessage(m: {
+    cmd?: string;
+    expr?: string;
+    on?: boolean;
+    s?: number;
+  }): Promise<void> {
     switch (m.cmd) {
       case 'ready':
         this.postEntries();
@@ -203,10 +210,8 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
       label.ck { display: flex; align-items: center; gap: 4px; cursor: pointer;
         font-size: 10.5px; color: var(--vscode-descriptionForeground); user-select: none; }
       #main { flex: 1; display: flex; min-height: 0; }
-      .hint { padding: 10px; color: var(--vscode-descriptionForeground);
-              font-size: 11px; line-height: 1.7; }
       #cvwrap { flex: 1; position: relative; min-width: 0; }
-      canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+      #cvwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
     </style></head><body>
       <div class="bar">
         <button id="selBtn" class="ac" title="勾选要绘制曲线的变量（可多选）">变量 ▾</button>
@@ -220,6 +225,7 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
         <button id="pause" title="暂停/继续采样绘制">暂停</button>
         <button id="clear" title="清空全部曲线数据">清空</button>
         <label class="ck"><input type="checkbox" id="ylock">锁定Y轴</label>
+        <span class="lb" style="margin-left:auto" title="滚轮缩放 · 拖动平移 · 双击回到实时">滚轮缩放 · 拖动平移</span>
         <div id="selPop"></div>
       </div>
       <div id="main">
@@ -229,6 +235,8 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
         const vscode = acquireVsCodeApi();
         const state = { order: [], meta: {}, sel: new Set(), series: {}, vEls: {},
                         win: 30, paused: false, yLock: false, yRange: null, lastT: 0,
+                        follow: true, view: { b: 0, e: 0 },
+                        hover: null, drag: null, plot: null,
                         noSession: true };
 
         /** 变量勾选下拉列表（色点 + 名称 + 当前值；仅标量可勾选） */
@@ -305,16 +313,23 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
           if (R < 60 || B - T < 30) {
             return;
           }
-          const tEnd = state.lastT || Date.now();
-          let tBegin = tEnd - state.win * 1000;
-          if (state.win === 0) {
-            let mn = Infinity;
-            for (const e of state.order) {
-              if (!state.sel.has(e)) continue;
-              const s = state.series[e];
-              if (s && s.ts.length && s.ts[0] < mn) mn = s.ts[0];
+          // 时间窗：跟随最新（win 选择器）或用户缩放/平移后的自由视图
+          let tEnd, tBegin;
+          if (state.follow) {
+            tEnd = state.lastT || Date.now();
+            tBegin = tEnd - state.win * 1000;
+            if (state.win === 0) {
+              let mn = Infinity;
+              for (const e of state.order) {
+                if (!state.sel.has(e)) continue;
+                const s = state.series[e];
+                if (s && s.ts.length && s.ts[0] < mn) mn = s.ts[0];
+              }
+              tBegin = mn === Infinity ? tEnd - 30000 : mn;
             }
-            tBegin = mn === Infinity ? tEnd - 30000 : mn;
+          } else {
+            tBegin = state.view.b; tEnd = state.view.e;
+            if (!(tEnd > tBegin)) { state.follow = true; tEnd = state.lastT || Date.now(); tBegin = tEnd - state.win * 1000; }
           }
           // Y 范围（窗口内数据）
           let ymin = Infinity, ymax = -Infinity, any = false;
@@ -323,7 +338,7 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
             const s = state.series[e];
             if (!s) continue;
             for (let i = 0; i < s.ts.length; i++) {
-              if (s.ts[i] < tBegin) continue;
+              if (s.ts[i] < tBegin || s.ts[i] > tEnd) continue;
               any = true;
               if (s.vs[i] < ymin) ymin = s.vs[i];
               if (s.vs[i] > ymax) ymax = s.vs[i];
@@ -369,7 +384,8 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
             ctx.strokeStyle = grid;
             ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, B); ctx.stroke();
             ctx.fillStyle = lab;
-            ctx.fillText('-' + Math.round((tEnd - (tBegin + span * i / gx)) / 1000) + 's', x - 10, H - 6);
+            const dt = (tEnd - (tBegin + span * i / gx)) / 1000;
+            ctx.fillText((span < 10000 ? dt.toFixed(1) : '-' + Math.round(dt)) + 's', x - 12, H - 6);
           }
           // 曲线
           for (const e of state.order) {
@@ -381,7 +397,7 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
             ctx.beginPath();
             let started = false;
             for (let i = 0; i < s.ts.length; i++) {
-              if (s.ts[i] < tBegin) continue;
+              if (s.ts[i] < tBegin || s.ts[i] > tEnd) continue;
               const x = L + (R - L) * (s.ts[i] - tBegin) / span;
               let y = T + (B - T) * (1 - (s.vs[i] - ymin) / (ymax - ymin));
               y = Math.max(T, Math.min(B, y));
@@ -389,13 +405,100 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
             }
             ctx.stroke();
           }
+          state.plot = { L, R, T, B, tb: tBegin, te: tEnd };
+          if (!state.follow) {
+            ctx.fillStyle = 'rgba(128,128,128,.75)';
+            ctx.textAlign = 'right';
+            ctx.fillText('已暂停跟随 · 双击回到实时', R - 2, T + 10);
+            ctx.textAlign = 'left';
+          }
           if (!any) {
             ctx.fillStyle = 'rgba(128,128,128,.9)';
             ctx.textAlign = 'center';
             ctx.fillText('点工具栏「变量 ▾」勾选要绘制的条目', (L + R) / 2, (T + B) / 2);
             ctx.textAlign = 'left';
+            return;
+          }
+          // 悬停：十字线 + 最近样本点 + 数值框
+          if (state.hover && !state.drag && state.hover.x >= L && state.hover.x <= R) {
+            const hx = state.hover.x;
+            const th = tBegin + (hx - L) / (R - L) * span;
+            ctx.strokeStyle = 'rgba(128,128,128,.55)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(hx, T); ctx.lineTo(hx, B); ctx.stroke();
+            const items = [];
+            for (const e of state.order) {
+              if (!state.sel.has(e)) continue;
+              const s = state.series[e];
+              if (!s || s.ts.length === 0) continue;
+              let lo = 0, hi = s.ts.length - 1;
+              while (hi - lo > 1) { const m = (lo + hi) >> 1; if (s.ts[m] < th) lo = m; else hi = m; }
+              const i = Math.abs(s.ts[lo] - th) <= Math.abs(s.ts[hi] - th) ? lo : hi;
+              const x = L + (R - L) * (s.ts[i] - tBegin) / span;
+              const y = Math.max(T, Math.min(B, T + (B - T) * (1 - (s.vs[i] - ymin) / (ymax - ymin))));
+              items.push({ color: s.color, name: e, v: s.vs[i], x, y });
+              ctx.fillStyle = s.color;
+              ctx.beginPath(); ctx.arc(x, y, 3, 0, 7); ctx.fill();
+              ctx.strokeStyle = 'rgba(0,0,0,.5)';
+              ctx.stroke();
+            }
+            if (items.length) {
+              const lines = items.slice(0, 10).map((it) => it.name + ' = ' + fmtNum(it.v));
+              let wmax = 0;
+              for (const ln of lines) wmax = Math.max(wmax, ctx.measureText(ln).width);
+              const bw = wmax + 14, bh = lines.length * 13 + 8;
+              let bx = hx + 12, by = T + 8;
+              if (bx + bw > R) bx = hx - bw - 12;
+              if (by + bh > B) by = B - bh - 4;
+              ctx.fillStyle = 'rgba(30,30,34,.92)';
+              ctx.fillRect(bx, by, bw, bh);
+              ctx.strokeStyle = 'rgba(128,128,128,.4)';
+              ctx.strokeRect(bx + .5, by + .5, bw - 1, bh - 1);
+              lines.forEach((ln, i) => {
+                ctx.fillStyle = items[i].color;
+                ctx.fillText(ln, bx + 7, by + 15 + i * 13);
+              });
+              ctx.fillStyle = lab;
+            }
           }
         }
+
+        // —— 曲线交互：滚轮缩放（光标锚定）、拖动平移、双击回跟随 ——
+        const cv = $('cv');
+        cv.addEventListener('wheel', (ev) => {
+          const p = state.plot; if (!p) return;
+          ev.preventDefault();
+          const f = ev.deltaY < 0 ? 0.8 : 1.25;
+          const tm = p.tb + (p.te - p.tb) * ((ev.offsetX - p.L) / Math.max(1, p.R - p.L));
+          let nb = tm - (tm - p.tb) * f, ne = tm + (p.te - tm) * f;
+          if (ne - nb < 200) { const c0 = (nb + ne) / 2; nb = c0 - 100; ne = c0 + 100; }
+          if (ne - nb > 3600e3) { const c0 = (nb + ne) / 2; nb = c0 - 1800e3; ne = c0 + 1800e3; }
+          state.follow = false;
+          state.view = { b: nb, e: ne };
+          draw();
+        }, { passive: false });
+        cv.addEventListener('mousedown', (ev) => {
+          const p = state.plot; if (!p) return;
+          state.drag = { x0: ev.offsetX, b: p.tb, e: p.te };
+        });
+        window.addEventListener('mousemove', (ev) => {
+          if (!state.drag) return;
+          const p = state.plot; if (!p) return;
+          const r = cv.getBoundingClientRect();
+          const x = ev.clientX - r.left;
+          const dt = (state.drag.x0 - x) / Math.max(1, p.R - p.L) * (state.drag.e - state.drag.b);
+          state.follow = false;
+          state.view = { b: state.drag.b + dt, e: state.drag.e + dt };
+          draw();
+        });
+        window.addEventListener('mouseup', () => { if (state.drag) { state.drag = null; draw(); } });
+        cv.addEventListener('mousemove', (ev) => {
+          if (state.drag) return;
+          state.hover = { x: ev.offsetX, y: ev.offsetY };
+          draw();
+        });
+        cv.addEventListener('mouseleave', () => { state.hover = null; draw(); });
+        cv.addEventListener('dblclick', () => { state.follow = true; draw(); });
 
         window.addEventListener('message', (e) => {
           const m = e.data;
@@ -444,6 +547,7 @@ export class ChartViewProvider implements vscode.WebviewViewProvider {
 
         $('win').addEventListener('change', () => {
           state.win = +$('win').value;
+          state.follow = true;
           post({ cmd: 'win', s: state.win });
           draw();
         });

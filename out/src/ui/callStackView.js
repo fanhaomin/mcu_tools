@@ -121,8 +121,7 @@ class CallStackViewProvider {
       #st { font-size: 11px; color: var(--vscode-descriptionForeground);
         display: flex; align-items: center; gap: 5px; }
       #st .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
-      table { width: 100%; table-layout: fixed; border-collapse: collapse;
-        border: 1px solid var(--dim); border-radius: 8px; overflow: hidden; }
+      table { width: 100%; table-layout: fixed; border-collapse: collapse; }
       th { position: sticky; top: 0; font-size: 10px; font-weight: 600; text-transform: uppercase;
         letter-spacing: .07em; text-align: left; color: var(--vscode-descriptionForeground);
         background: var(--vscode-sideBar-background); padding: 5px 8px;

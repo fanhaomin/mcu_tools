@@ -67,6 +67,8 @@ const COLW_KEY = 'acf.watch.colw';
 const DEF_COLW = [34, 20, 30, 16];
 const MAX_ENTRIES = 32;
 const MAX_CHILDREN = 32;
+/** DWARF 展开每层物化子节点上限（行 DOM 全量建，数值只读视口内的行） */
+const MAX_DWARF_CHILDREN = 2048;
 /** 聚合变量（数组/结构体）整块读取的字节上限（一次 DAP readMemory） */
 const AGG_READ_CAP = 256;
 function kindLabelOf(k) {
@@ -97,6 +99,8 @@ class WatchViewProvider {
     dwarfLoading;
     lastEmptySymLog = 0;
     lastDwarfApply = 0;
+    /** webview 视口内可见的子节点行（expr#path）：大数组/结构体只补读可见部分 */
+    visKeys = new Set();
     /** 上次存在性核验的 ELF 标识（路径+mtime）：同 ELF 只核验一次，重编译后重跑 */
     membershipElf;
     /** 用户拖拽的列宽（%，4 列），持久化 */
@@ -410,13 +414,32 @@ class WatchViewProvider {
                     });
                 }
                 else {
-                    this.entries.push({
-                        expr: name,
-                        bytes: spec?.bytes ?? 4,
-                        kind: spec?.kind ?? 'u32',
-                        typeLabel: spec?.label ?? 'uint32_t',
-                        explicitType: !!spec,
-                    });
+                    // 静态表达式（test_array[1] / cfg.speed / sa[2].x）：DWARF 类型树算地址，
+                    // 直接监控该元素。explicitType 免存在性门禁按名误杀（表达式非符号名）。
+                    const cat = await this.ensureDwarf();
+                    const r = cat.byName.size > 0 ? (0, dwarf_1.resolveExprPath)(cat.byName, name) : undefined;
+                    if (r && r.addr > 0) {
+                        const lf = (0, dwarf_1.legacyFieldsOf)(r.type, AGG_READ_CAP);
+                        this.entries.push({
+                            expr: name,
+                            addr: r.addr,
+                            bytes: spec?.bytes ?? lf.bytes,
+                            kind: spec?.kind ?? lf.kind,
+                            typeLabel: spec?.label ?? r.type.label,
+                            type: r.type,
+                            explicitType: true,
+                        });
+                        this.deps.log(`变量监控: ${name} @ 0x${r.addr.toString(16).toUpperCase()} ${r.type.label} — 表达式解析`);
+                    }
+                    else {
+                        this.entries.push({
+                            expr: name,
+                            bytes: spec?.bytes ?? 4,
+                            kind: spec?.kind ?? 'u32',
+                            typeLabel: spec?.label ?? 'uint32_t',
+                            explicitType: !!spec,
+                        });
+                    }
                 }
                 await this.persist();
                 this.postEntries();
@@ -445,7 +468,7 @@ class WatchViewProvider {
                             e.children = [this.derefChild(e.type, '')];
                         }
                         else if (e.type && e.addr !== undefined) {
-                            e.children = (0, dwarf_1.materializeChildren)(e.addr, e.type, '') ?? [];
+                            e.children = (0, dwarf_1.materializeChildren)(e.addr, e.type, '', MAX_DWARF_CHILDREN) ?? [];
                         }
                         else if (e.varRef) {
                             const s = this.deps.getSession();
@@ -465,13 +488,28 @@ class WatchViewProvider {
                             }
                             else if (c.addr !== undefined || c.deref) {
                                 // deref 节点静态地址未知：子节点按偏移物化（读取时以运行时地址为基）
-                                c.children = (0, dwarf_1.materializeChildren)(c.addr ?? 0, c.type, path) ?? [];
+                                c.children = (0, dwarf_1.materializeChildren)(c.addr ?? 0, c.type, path, MAX_DWARF_CHILDREN) ?? [];
                             }
                         }
                     }
                 }
                 await this.persist();
                 this.postEntries();
+                break;
+            }
+            case 'vis': {
+                // 视口内可见行（expr#path）：下一轮刷新只补读这些行（大数组滚动到哪读到哪）
+                const next = new Set(m.keys ?? []);
+                const same = next.size === this.visKeys.size && [...next].every((k) => this.visKeys.has(k));
+                if (!same) {
+                    this.visKeys = next;
+                    if (this.visible && !this.refreshing && this.deps.getSession()) {
+                        this.refreshing = true;
+                        void this.refresh(this.deps.getInterval()).finally(() => {
+                            this.refreshing = false;
+                        });
+                    }
+                }
                 break;
             }
             case 'read': {
@@ -490,6 +528,24 @@ class WatchViewProvider {
                 break;
         }
     }
+    /** 数组面板用矩阵规格（二维+标量数组），含读取所需的地址/元素解码信息 */
+    matrixInfo(e) {
+        const ms = e.type ? (0, dwarf_1.matrixSpecOf)(e.type) : undefined;
+        if (!ms) {
+            return undefined;
+        }
+        let total = ms.elemBytes;
+        for (const d of ms.dims) {
+            total *= d;
+        }
+        return {
+            dims: ms.dims,
+            bytes: total,
+            addr: e.addr,
+            elemBytes: ms.elemBytes,
+            kind: ms.kind,
+        };
+    }
     postEntries() {
         this.notifyChart();
         void this.view?.webview.postMessage({
@@ -506,6 +562,7 @@ class WatchViewProvider {
             typeLabel: e.typeLabel,
             scalar: this.isNumericEntry(e),
             colorIdx: i,
+            matrix: this.matrixInfo(e),
         })));
     }
     /** 波形面板就绪时回填条目（含仅打开波形标签、监控标签从未打开的场景） */
@@ -1069,6 +1126,65 @@ class WatchViewProvider {
                 }));
             }
         }
+        // ---- 可见子节点按需补读（大数组/结构体：只读视口内的行，滚动到哪读到哪） ----
+        // 根块前 256B 已解出的行跳过；指针解引用子节点走 derefTarget 通路，这里不重复
+        if (this.visKeys.size > 0) {
+            const pend = [];
+            for (const k of this.visKeys) {
+                const sep = k.indexOf('#');
+                if (sep <= 0) {
+                    continue;
+                }
+                const e = this.entries.find((x) => x.expr === k.slice(0, sep));
+                if (!e || !e.type || !e.expanded || !e.children) {
+                    continue;
+                }
+                const path = k.slice(sep + 1);
+                if (!path || (childVals[e.expr]?.[path]?.ok)) {
+                    continue; // 根块已覆盖：本轮已有新值，不重复读
+                }
+                const c = this.findChild(e, path);
+                if (!c || c.deref || c.addr === undefined || !c.type) {
+                    continue;
+                }
+                // 已展开的聚合行不整块读：可见的叶子行会各自请求
+                if (c.expanded && c.children && c.children.length > 0) {
+                    continue;
+                }
+                pend.push({ e, c, t: c.type });
+            }
+            const vspans = [];
+            for (const p of [...pend].sort((a, b) => a.c.addr - b.c.addr)) {
+                const agg = p.t.cat === 'array' || p.t.cat === 'struct';
+                const want = agg ? Math.min(p.c.bytes, AGG_READ_CAP) : p.c.bytes;
+                const end = p.c.addr + Math.max(1, want);
+                const last = vspans[vspans.length - 1];
+                if (last && p.c.addr - last.end <= SPAN_GAP && end - last.start <= SPAN_MAX) {
+                    last.end = Math.max(last.end, end);
+                    last.items.push(p);
+                }
+                else {
+                    vspans.push({ start: p.c.addr, end, items: [p] });
+                }
+            }
+            await Promise.all(vspans.map(async (sp) => {
+                const buf = await (0, dapHelpers_1.readBlock)(s, sp.start, sp.end - sp.start);
+                for (const p of sp.items) {
+                    const agg = p.t.cat === 'array' || p.t.cat === 'struct';
+                    const want = agg ? Math.min(p.c.bytes, AGG_READ_CAP) : p.c.bytes;
+                    const off = p.c.addr - sp.start;
+                    const slice = buf ? buf.subarray(off, off + want) : undefined;
+                    const d = (0, dwarf_1.decodeByType)(slice, p.t);
+                    const need = agg ? 1 : p.c.bytes;
+                    childVals[p.e.expr] = childVals[p.e.expr] ?? {};
+                    childVals[p.e.expr][p.c.path || p.c.name] = {
+                        hex: d.hex,
+                        value: d.value,
+                        ok: !!slice && slice.length >= Math.min(need, Math.max(1, want)),
+                    };
+                }
+            }));
+        }
         // ---- 指针解引用：目标地址 = 父指针的运行时值（旁路读，零停机） ----
         const derefTarget = async (addr, dc, out) => {
             if (!Number.isFinite(addr) || addr <= 0) {
@@ -1242,8 +1358,7 @@ class WatchViewProvider {
         background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
       button.ghost { background: var(--vscode-button-secondaryBackground);
         color: var(--vscode-button-secondaryForeground); }
-      .wtable { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0;
-        border: 1px solid var(--dim); border-radius: 8px; overflow: hidden; }
+      .wtable { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
       .wtable th { position: sticky; top: 0; z-index: 1; font-size: 10px; font-weight: 600;
         text-transform: uppercase; letter-spacing: .07em; text-align: left;
         color: var(--vscode-descriptionForeground); background: var(--vscode-sideBar-background);
@@ -1477,6 +1592,7 @@ class WatchViewProvider {
           if (state.entries.length === 0) {
             list.innerHTML = '<div class="empty"><span class="glyph">⌖</span>添加要实时监控的变量<br>全局/静态/数组/结构体：直接填变量名<br>（ELF DWARF 解析类型，可展开）<br>局部变量：打一个断点即自动捕获</div>';
             cells.clear(); cellText.clear();
+            visObs && (visObs.disconnect(), visSeen.clear(), sendVis());
             return;
           }
           let h = '<table class="wtable">' +
@@ -1503,6 +1619,7 @@ class WatchViewProvider {
           for (const el of list.querySelectorAll('[data-vk]')) cells.set('v:' + el.getAttribute('data-vk'), el);
           for (const el of list.querySelectorAll('[data-ak]')) cells.set('a:' + el.getAttribute('data-ak'), el);
           patchValues();
+          observeRows();
         }
 
         function setCell(key, text, cls) {
@@ -1541,6 +1658,33 @@ class WatchViewProvider {
           }
         }
 
+        /** 视口可见行上报：宿主只补读屏幕内的行（大数组滚动到哪读到哪） */
+        const visSeen = new Set();
+        let visTimer = null;
+        const visObs = 'IntersectionObserver' in window
+          ? new IntersectionObserver((ents) => {
+              for (const en of ents) {
+                const k = en.target.getAttribute('data-vk');
+                if (k) { if (en.isIntersecting) visSeen.add(k); else visSeen.delete(k); }
+              }
+              if (!visTimer) visTimer = setTimeout(sendVis, 150);
+            }, { threshold: 0 }) : null;
+        function sendVis() {
+          visTimer = null;
+          if (visObs) post({ cmd: 'vis', keys: [...visSeen] });
+        }
+        function observeRows() {
+          if (!visObs) return;
+          visObs.disconnect();
+          visSeen.clear();
+          document.querySelectorAll('#list tr[data-p]').forEach((tr) => {
+            if (!tr.getAttribute('data-p')) return; // 根行随整块读取，不参与按行补读
+            const vc = tr.querySelector('td[data-vk]');
+            if (vc) visObs.observe(vc);
+          });
+          sendVis();
+        }
+
         /** 周期刷新入口：只写发生变化的单元格，不重建 DOM */
         function patchValues() {
           if (state.entries.length === 0) return;
@@ -1567,10 +1711,14 @@ class WatchViewProvider {
             state.entries = m.entries || [];
             state.fmt = m.fmt || 'dec';
             if (m.colw && m.colw.length === 4) state.colw = m.colw;
+            state.childVals = {};
             renderStructure();
           } else if (m.cmd === 'values') {
             state.vals = m.values || {};
-            state.childVals = m.childVals || {};
+            // 合并而非整表替换：视口外未采样的行保留上次值（可见行由 vis 机制补读）
+            for (const ex in (m.childVals || {})) {
+              state.childVals[ex] = Object.assign(state.childVals[ex] || {}, m.childVals[ex]);
+            }
             patchValues();
           }
         });

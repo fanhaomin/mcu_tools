@@ -63,6 +63,7 @@ import { ConfigPanel } from './ui/configPanel';
 import { cleanupLegacyDeadKeys, updateWorkspaceSetting } from './config/workspaceSettings';
 import { WatchViewProvider } from './ui/watchView';
 import { ChartViewProvider } from './ui/chartView';
+import { ArrayViewProvider } from './ui/arrayView';
 import { MemViewProvider } from './ui/memView';
 import { CallStackViewProvider } from './ui/callStackView';
 import { DisasmViewProvider } from './ui/disasmView';
@@ -144,6 +145,7 @@ function init(context: vscode.ExtensionContext): void {
       periph.setIntervalMs(settings.debugRefreshMs);
       watch.setIntervalMs(settings.debugRefreshMs);
       chart.setIntervalMs();
+      arrayv.setIntervalMs();
       mem.setIntervalMs(settings.debugRefreshMs);
       refresh();
     }),
@@ -1342,6 +1344,14 @@ function init(context: vscode.ExtensionContext): void {
     forceSample: () => watchRef?.forceSample(),
     onReady: () => watchRef?.syncChart(),
   });
+  // 数组面板：二维及以上标量数组的矩阵可视化（独立于波形，自行 readMemory 采样）
+  const arrayv = new ArrayViewProvider({
+    memento: context.workspaceState,
+    getSession: () => engineSession,
+    log,
+    getInterval: () => settings.debugRefreshMs,
+    onReady: () => watchRef?.syncChart(),
+  });
   const watch = new WatchViewProvider({
     getSession: () => engineSession,
     log,
@@ -1376,7 +1386,10 @@ function init(context: vscode.ExtensionContext): void {
       return existsSync(re) ? re : undefined;
     },
     getInterval: () => settings.debugRefreshMs,
-    onEntries: (list) => chart.setEntries(list),
+    onEntries: (list) => {
+      chart.setEntries(list);
+      arrayv.setEntries(list);
+    },
     onSample: (t, vals) => {
       chart.pushSample(t, vals);
     },
@@ -1423,6 +1436,9 @@ function init(context: vscode.ExtensionContext): void {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.window.registerWebviewViewProvider(ChartViewProvider.viewType, chart, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerWebviewViewProvider(ArrayViewProvider.viewType, arrayv, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.window.registerWebviewViewProvider(MemViewProvider.viewType, mem, {
@@ -1484,19 +1500,13 @@ function init(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // 「已编译进固件」标注（设置 showCompiledMark 可关）：C/C++ 编辑器打开/激活时
-  // 淡绿底标出有指令的源码行；关闭时清除已有标注
+  // 「已编译进固件」绿点标注（始终开启）：C/C++ 编辑器打开/激活时行尾标出有指令的源码行
   const isCFile = (doc: vscode.TextDocument): boolean =>
     /^(c|cpp)$/.test(doc.languageId) || /\.(c|h|cpp|hpp)$/i.test(doc.fileName);
   const decorate = (ed: vscode.TextEditor | undefined): void => {
-    if (!ed || !isCFile(ed.document)) {
-      return;
+    if (ed && isCFile(ed.document)) {
+      void disasm.decorateEditor(ed);
     }
-    if (!settings.showCompiledMark) {
-      disasm.clearCompiledMark(ed);
-      return;
-    }
-    void disasm.decorateEditor(ed);
   };
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(decorate),
@@ -1506,12 +1516,21 @@ function init(context: vscode.ExtensionContext): void {
         decorate(ed);
       }
     }),
-    onSettingsChange(() => {
-      // 开关切换即时生效：重标或清除所有可见 C/C++ 编辑器
-      for (const ed of vscode.window.visibleTextEditors) {
-        decorate(ed);
-      }
-    }),
+    // ELF 重建（覆盖所有构建路径，含手动 ninja）→ 重解析目录并重标全部可见 C/C++
+    // 编辑器，免除“编译完要切一下文件才显示”
+    (() => {
+      const w = vscode.workspace.createFileSystemWatcher('**/*.elf');
+      let timer: NodeJS.Timeout | undefined;
+      const kick = (): void => {
+        if (timer) {
+          clearTimeout(timer);
+        }
+        timer = setTimeout(() => disasm.onElfRebuilt(), 300);
+      };
+      w.onDidChange(kick);
+      w.onDidCreate(kick);
+      return w;
+    })(),
   );
   if (vscode.window.activeTextEditor) {
     decorate(vscode.window.activeTextEditor);

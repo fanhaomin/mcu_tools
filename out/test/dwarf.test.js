@@ -351,4 +351,109 @@ const catalogO0 = (0, dwarf_1.parseReadelfInfo)(dumpO0);
     const r = (0, dwarf_1.decodeByType)(Buffer.from([1, 2, 3, 4]), t);
     strict_1.default.equal(r.value, '[4 项]');
 });
+// ---------------- 波形热图：矩阵规格与解码 ----------------
+const SCALAR = (kind, bytes) => ({
+    cat: 'scalar', kind, label: kind, bytes,
+});
+(0, node_test_1.test)('matrixSpecOf：多维标量数组给出 dims/元素字节/解码类别', () => {
+    const t = {
+        cat: 'array', label: 'float[2][3]', bytes: 24, count: 6,
+        dims: [2, 3], elem: SCALAR('f32', 4),
+    };
+    const ms = (0, dwarf_1.matrixSpecOf)(t);
+    strict_1.default.ok(ms, '二维数组应有矩阵规格');
+    strict_1.default.deepEqual(ms.dims, [2, 3]);
+    strict_1.default.equal(ms.elemBytes, 4);
+    strict_1.default.equal(ms.kind, 'f32');
+});
+(0, node_test_1.test)('matrixSpecOf：三维数组 / 一维数组 / 结构体数组的取舍', () => {
+    const t3 = {
+        cat: 'array', label: 'uint16_t[4][3][2]', bytes: 48, count: 24,
+        dims: [4, 3, 2], elem: SCALAR('u16', 2),
+    };
+    const ms = (0, dwarf_1.matrixSpecOf)(t3);
+    strict_1.default.ok(ms && ms.dims.length === 3, '三维数组有规格');
+    const t1 = {
+        cat: 'array', label: 'uint8_t[8]', bytes: 8, count: 8,
+        elem: SCALAR('u8', 1),
+    };
+    strict_1.default.equal((0, dwarf_1.matrixSpecOf)(t1), undefined, '一维数组无规格');
+    const ts = {
+        cat: 'array', label: 'struct[2][2]', bytes: 64, count: 4,
+        dims: [2, 2],
+        elem: { cat: 'struct', label: 'S', bytes: 16, members: [] },
+    };
+    strict_1.default.equal((0, dwarf_1.matrixSpecOf)(ts), undefined, '结构体元素无规格');
+});
+(0, node_test_1.test)('decodeMatrix：小端摊平，浮点 3 位截尾', () => {
+    const buf = Buffer.alloc(12);
+    buf.writeFloatLE(1.25, 0);
+    buf.writeFloatLE(-2.56789, 4);
+    buf.writeFloatLE(3, 8);
+    const vals = (0, dwarf_1.decodeMatrix)(buf, { elemBytes: 4, kind: 'f32' });
+    strict_1.default.deepEqual(vals, [1.25, -2.568, 3]);
+    const b2 = Buffer.from([1, 0, 0xff, 0x7f]);
+    strict_1.default.deepEqual((0, dwarf_1.decodeMatrix)(b2, { elemBytes: 1, kind: 'u8' }), [1, 0, 255, 127]);
+    strict_1.default.deepEqual((0, dwarf_1.decodeMatrix)(Buffer.from([0xfe, 0xff]), { elemBytes: 2, kind: 'i16' }), [-2]);
+});
+// ---------------- 静态表达式解析（name[i] / name.member 及组合） ----------------
+const U32 = () => ({ cat: 'scalar', kind: 'u32', label: 'uint32_t', bytes: 4 });
+const F32 = () => ({ cat: 'scalar', kind: 'f32', label: 'float', bytes: 4 });
+const U8 = () => ({ cat: 'scalar', kind: 'u8', label: 'uint8_t', bytes: 1 });
+function varMap(entries) {
+    const out = new Map();
+    for (const [name, e] of Object.entries(entries)) {
+        out.set(name, {
+            name, addr: e.addr, size: e.type.bytes, type: e.type,
+            file: undefined, scope: undefined,
+            external: true,
+        });
+    }
+    return out;
+}
+(0, node_test_1.test)('resolveExprPath：一维/二维数组常量下标', () => {
+    const cat = varMap({
+        test_array: { addr: 0x20000000, type: { cat: 'array', label: 'uint32_t[4]', bytes: 16, count: 4, elem: U32() } },
+        mat: { addr: 0x20000100, type: { cat: 'array', label: 'float[2][3]', bytes: 24, count: 6, dims: [2, 3], elem: F32() } },
+    });
+    const r1 = (0, dwarf_1.resolveExprPath)(cat, 'test_array[2]');
+    strict_1.default.ok(r1, '一维下标应解析');
+    strict_1.default.equal(r1.addr, 0x20000008);
+    strict_1.default.equal(r1.type.cat, 'scalar');
+    const r2 = (0, dwarf_1.resolveExprPath)(cat, 'mat[1][2]');
+    strict_1.default.ok(r2, '二维下标应解析');
+    strict_1.default.equal(r2.addr, 0x20000100 + (1 * 3 + 2) * 4);
+    strict_1.default.equal(r2.type.cat, 'scalar');
+});
+(0, node_test_1.test)('resolveExprPath：结构体成员与数组-成员组合', () => {
+    const st = {
+        cat: 'struct', label: 'Cfg', bytes: 12,
+        members: [
+            { name: 'a', offset: 0, type: U8() },
+            { name: 'b', offset: 4, type: U32() },
+            { name: 'c', offset: 8, type: F32() },
+        ],
+    };
+    const cat = varMap({
+        cfg: { addr: 0x20000200, type: st },
+        sa: { addr: 0x20000300, type: { cat: 'array', label: 'Cfg[3]', bytes: 36, count: 3, elem: st } },
+    });
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'cfg.b')?.addr, 0x20000204);
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'cfg.a')?.addr, 0x20000200);
+    const r = (0, dwarf_1.resolveExprPath)(cat, 'sa[2].c');
+    strict_1.default.ok(r, '数组元素成员应解析');
+    strict_1.default.equal(r.addr, 0x20000300 + 2 * 12 + 8);
+    strict_1.default.equal(r.type.cat, 'scalar');
+});
+(0, node_test_1.test)('resolveExprPath：越界/未知成员/非法链全部拒绝', () => {
+    const cat = varMap({
+        arr: { addr: 0x20000000, type: { cat: 'array', label: 'uint32_t[4]', bytes: 16, count: 4, elem: U32() } },
+        tick: { addr: 0x20000040, type: U32() },
+    });
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'arr[4]'), undefined, '越界下标');
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'arr.zz'), undefined, '对数组取成员');
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'tick[0]'), undefined, '对标量取下标');
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'nope[0]'), undefined, '未知变量');
+    strict_1.default.equal((0, dwarf_1.resolveExprPath)(cat, 'arr[1'), undefined, '非法语法');
+});
 //# sourceMappingURL=dwarf.test.js.map

@@ -18,6 +18,9 @@ exports.legacyFieldsOf = legacyFieldsOf;
 exports.materializeChildren = materializeChildren;
 exports.encodeValueText = encodeValueText;
 exports.decodeTypedSubtree = decodeTypedSubtree;
+exports.matrixSpecOf = matrixSpecOf;
+exports.decodeMatrix = decodeMatrix;
+exports.resolveExprPath = resolveExprPath;
 exports.parseReadelfInfo = parseReadelfInfo;
 exports.readDwarfCatalog = readDwarfCatalog;
 exports.decodeByType = decodeByType;
@@ -204,6 +207,121 @@ function decodeTypedSubtree(buf, baseAddr, children, out) {
             decodeTypedSubtree(buf, baseAddr, c.children, out);
         }
     }
+}
+/** 二维及以上标量数组 → 矩阵规格；元素非标量（如结构体数组）不可视化 */
+function matrixSpecOf(type) {
+    if (!type || type.cat !== 'array' || !type.dims || type.dims.length < 2) {
+        return undefined;
+    }
+    let el = type.elem;
+    while (el.cat === 'array') {
+        el = el.elem;
+    }
+    let kind;
+    if (el.cat === 'scalar') {
+        kind = el.kind === 'hex' ? 'u32' : el.kind;
+    }
+    else if (el.cat === 'bool') {
+        kind = 'u8';
+    }
+    else if (el.cat === 'enum') {
+        kind = el.bytes > 4 ? 'i64' : 'i32';
+    }
+    else {
+        return undefined;
+    }
+    const dims = type.dims.filter((d) => d > 0);
+    if (dims.length < 2) {
+        return undefined;
+    }
+    return { dims, elemBytes: Math.max(1, el.bytes ?? 4), kind };
+}
+/** 矩阵整块小端解码为摊平数值（行主序）；浮点 3 位小数截尾压缩推送体积 */
+function decodeMatrix(buf, spec) {
+    const n = Math.floor(buf.byteLength / spec.elemBytes);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+        const o = i * spec.elemBytes;
+        let v;
+        switch (spec.kind) {
+            case 'f32':
+                v = buf.readFloatLE(o);
+                break;
+            case 'f64':
+                v = buf.readDoubleLE(o);
+                break;
+            case 'i8':
+                v = buf.readInt8(o);
+                break;
+            case 'i16':
+                v = buf.readInt16LE(o);
+                break;
+            case 'i32':
+                v = buf.readInt32LE(o);
+                break;
+            case 'i64':
+                v = Number(buf.readBigInt64LE(o));
+                break;
+            case 'u16':
+                v = buf.readUInt16LE(o);
+                break;
+            case 'u32':
+                v = buf.readUInt32LE(o);
+                break;
+            case 'u64':
+                v = Number(buf.readBigUInt64LE(o));
+                break;
+            default:
+                v = buf.readUInt8(o);
+                break;
+        }
+        out[i] = Number.isInteger(v) ? v : Math.round(v * 1000) / 1000;
+    }
+    return out;
+}
+/**
+ * 静态表达式解析：name[常量]… / name.member… 及组合 → 地址与类型。
+ * 仅静态偏移：越界下标、未知成员名、对指针/标量的非法下标都返回 undefined
+ * （不瞎猜地址）；指针解引用（*p / p[0] 经运行时值）不支持，走监控展开路径。
+ */
+function resolveExprPath(byName, expr) {
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)((?:\[\d+\]|\.[A-Za-z_][A-Za-z0-9_]*)*)$/.exec(expr.trim());
+    if (!m) {
+        return undefined;
+    }
+    const base = byName.get(m[1]);
+    if (!base || base.addr === 0 || !base.type) {
+        return undefined;
+    }
+    let addr = base.addr;
+    let type = base.type;
+    for (const t of m[2].matchAll(/\[(\d+)\]|\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+        if (t[1] !== undefined) {
+            if (type.cat !== 'array') {
+                return undefined;
+            }
+            const idx = Number.parseInt(t[1], 10);
+            const dims = type.dims && type.dims.length > 1 ? type.dims : [type.count];
+            if (idx >= dims[0]) {
+                return undefined; // 越界
+            }
+            const stride = dims.slice(1).reduce((a, b) => a * b, 1) * type.elem.bytes;
+            addr += idx * stride;
+            type = dims.length > 1 ? subArrayType(type.elem, dims.slice(1)) : type.elem;
+        }
+        else {
+            if (type.cat !== 'struct') {
+                return undefined;
+            }
+            const mem = type.members.find((x) => x.name === t[2]);
+            if (!mem) {
+                return undefined;
+            }
+            addr += mem.offset;
+            type = mem.type;
+        }
+    }
+    return { addr, type };
 }
 const DIE_RE = /^\s*<(\d+)><([0-9a-f]{1,8})>:\s*Abbrev Number:\s*\d+(?:\s*\((DW_TAG_\w+)\))?/;
 const ATTR_RE = /^\s*<[0-9a-f]{1,8}>\s+(DW_AT_\w+)\s*:\s?(.*)$/;

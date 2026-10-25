@@ -15,6 +15,10 @@ import {
   materializeChildren,
   decodeTypedSubtree,
   encodeValueText,
+  matrixSpecOf,
+  decodeMatrix,
+  resolveExprPath,
+  DwarfVar,
   TypeDesc,
 } from '../src/debug/dwarf';
 
@@ -391,4 +395,120 @@ test('uint8_t 数组聚合值：不按字符串显示', () => {
   };
   const r = decodeByType(Buffer.from([1, 2, 3, 4]), t);
   assert.equal(r.value, '[4 项]');
+});
+
+// ---------------- 波形热图：矩阵规格与解码 ----------------
+
+const SCALAR = (kind: 'u8' | 'u16' | 'f32' | 'i16', bytes: number): TypeDesc => ({
+  cat: 'scalar', kind, label: kind, bytes,
+});
+
+test('matrixSpecOf：多维标量数组给出 dims/元素字节/解码类别', () => {
+  const t: TypeDesc = {
+    cat: 'array', label: 'float[2][3]', bytes: 24, count: 6,
+    dims: [2, 3], elem: SCALAR('f32', 4),
+  };
+  const ms = matrixSpecOf(t);
+  assert.ok(ms, '二维数组应有矩阵规格');
+  assert.deepEqual(ms.dims, [2, 3]);
+  assert.equal(ms.elemBytes, 4);
+  assert.equal(ms.kind, 'f32');
+});
+
+test('matrixSpecOf：三维数组 / 一维数组 / 结构体数组的取舍', () => {
+  const t3: TypeDesc = {
+    cat: 'array', label: 'uint16_t[4][3][2]', bytes: 48, count: 24,
+    dims: [4, 3, 2], elem: SCALAR('u16', 2),
+  };
+  const ms = matrixSpecOf(t3);
+  assert.ok(ms && ms.dims.length === 3, '三维数组有规格');
+  const t1: TypeDesc = {
+    cat: 'array', label: 'uint8_t[8]', bytes: 8, count: 8,
+    elem: SCALAR('u8', 1),
+  };
+  assert.equal(matrixSpecOf(t1), undefined, '一维数组无规格');
+  const ts: TypeDesc = {
+    cat: 'array', label: 'struct[2][2]', bytes: 64, count: 4,
+    dims: [2, 2],
+    elem: { cat: 'struct', label: 'S', bytes: 16, members: [] },
+  };
+  assert.equal(matrixSpecOf(ts), undefined, '结构体元素无规格');
+});
+
+test('decodeMatrix：小端摊平，浮点 3 位截尾', () => {
+  const buf = Buffer.alloc(12);
+  buf.writeFloatLE(1.25, 0);
+  buf.writeFloatLE(-2.56789, 4);
+  buf.writeFloatLE(3, 8);
+  const vals = decodeMatrix(buf, { elemBytes: 4, kind: 'f32' });
+  assert.deepEqual(vals, [1.25, -2.568, 3]);
+  const b2 = Buffer.from([1, 0, 0xff, 0x7f]);
+  assert.deepEqual(decodeMatrix(b2, { elemBytes: 1, kind: 'u8' }), [1, 0, 255, 127]);
+  assert.deepEqual(decodeMatrix(Buffer.from([0xfe, 0xff]), { elemBytes: 2, kind: 'i16' }), [-2]);
+});
+
+// ---------------- 静态表达式解析（name[i] / name.member 及组合） ----------------
+
+const U32 = (): TypeDesc => ({ cat: 'scalar', kind: 'u32', label: 'uint32_t', bytes: 4 });
+const F32 = (): TypeDesc => ({ cat: 'scalar', kind: 'f32', label: 'float', bytes: 4 });
+const U8 = (): TypeDesc => ({ cat: 'scalar', kind: 'u8', label: 'uint8_t', bytes: 1 });
+
+function varMap(entries: Record<string, { addr: number; type: TypeDesc }>): Map<string, DwarfVar> {
+  const out = new Map<string, DwarfVar>();
+  for (const [name, e] of Object.entries(entries)) {
+    out.set(name, {
+      name, addr: e.addr, size: e.type.bytes, type: e.type,
+      file: undefined as unknown as string, scope: undefined as unknown as string,
+      external: true,
+    } as DwarfVar);
+  }
+  return out;
+}
+
+test('resolveExprPath：一维/二维数组常量下标', () => {
+  const cat = varMap({
+    test_array: { addr: 0x20000000, type: { cat: 'array', label: 'uint32_t[4]', bytes: 16, count: 4, elem: U32() } },
+    mat: { addr: 0x20000100, type: { cat: 'array', label: 'float[2][3]', bytes: 24, count: 6, dims: [2, 3], elem: F32() } },
+  });
+  const r1 = resolveExprPath(cat, 'test_array[2]');
+  assert.ok(r1, '一维下标应解析');
+  assert.equal(r1.addr, 0x20000008);
+  assert.equal(r1.type.cat, 'scalar');
+  const r2 = resolveExprPath(cat, 'mat[1][2]');
+  assert.ok(r2, '二维下标应解析');
+  assert.equal(r2.addr, 0x20000100 + (1 * 3 + 2) * 4);
+  assert.equal(r2.type.cat, 'scalar');
+});
+
+test('resolveExprPath：结构体成员与数组-成员组合', () => {
+  const st: TypeDesc = {
+    cat: 'struct', label: 'Cfg', bytes: 12,
+    members: [
+      { name: 'a', offset: 0, type: U8() },
+      { name: 'b', offset: 4, type: U32() },
+      { name: 'c', offset: 8, type: F32() },
+    ],
+  };
+  const cat = varMap({
+    cfg: { addr: 0x20000200, type: st },
+    sa: { addr: 0x20000300, type: { cat: 'array', label: 'Cfg[3]', bytes: 36, count: 3, elem: st } },
+  });
+  assert.equal(resolveExprPath(cat, 'cfg.b')?.addr, 0x20000204);
+  assert.equal(resolveExprPath(cat, 'cfg.a')?.addr, 0x20000200);
+  const r = resolveExprPath(cat, 'sa[2].c');
+  assert.ok(r, '数组元素成员应解析');
+  assert.equal(r.addr, 0x20000300 + 2 * 12 + 8);
+  assert.equal(r.type.cat, 'scalar');
+});
+
+test('resolveExprPath：越界/未知成员/非法链全部拒绝', () => {
+  const cat = varMap({
+    arr: { addr: 0x20000000, type: { cat: 'array', label: 'uint32_t[4]', bytes: 16, count: 4, elem: U32() } },
+    tick: { addr: 0x20000040, type: U32() },
+  });
+  assert.equal(resolveExprPath(cat, 'arr[4]'), undefined, '越界下标');
+  assert.equal(resolveExprPath(cat, 'arr.zz'), undefined, '对数组取成员');
+  assert.equal(resolveExprPath(cat, 'tick[0]'), undefined, '对标量取下标');
+  assert.equal(resolveExprPath(cat, 'nope[0]'), undefined, '未知变量');
+  assert.equal(resolveExprPath(cat, 'arr[1'), undefined, '非法语法');
 });

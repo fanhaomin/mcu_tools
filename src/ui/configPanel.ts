@@ -74,7 +74,6 @@ export class ConfigPanel {
         fields: [
           { key: 'probeRsChip', label: 'probe-rs 芯片名', type: 'text', hint: '如 STM32F103C8，留空按识别型号自动推导' },
           { key: 'svdFile', label: 'SVD 文件路径', type: 'text', hint: '留空 = 按芯片型号自动定位' },
-          { key: 'showCompiledMark', label: '已编译行标注', type: 'bool', hint: '编辑器淡绿底标注已编译进固件的源码行（反汇编数据驱动，不开调试也可用）' },
         ],
       },
       {
@@ -174,9 +173,9 @@ export class ConfigPanel {
       button.ghost { background: var(--vscode-button-secondaryBackground);
         color: var(--vscode-button-secondaryForeground); }
       #wrap { max-width: 760px; margin: 0 auto; padding: 12px 16px; }
-      .card { border: 1px solid var(--dim); border-radius: 10px; padding: 14px 16px 10px;
-              background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
-              margin-bottom: 12px; }
+      .card { padding: 14px 2px 10px; margin-bottom: 0;
+              border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+      .card:last-child { border-bottom: none; }
       .cap { font-size: 12px; font-weight: 700; letter-spacing: .06em; margin-bottom: 10px; }
       .frow { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
       .flabel { width: 190px; flex: 0 0 auto; }

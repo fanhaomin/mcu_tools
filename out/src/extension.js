@@ -70,6 +70,7 @@ const configPanel_1 = require("./ui/configPanel");
 const workspaceSettings_1 = require("./config/workspaceSettings");
 const watchView_1 = require("./ui/watchView");
 const chartView_1 = require("./ui/chartView");
+const arrayView_1 = require("./ui/arrayView");
 const memView_1 = require("./ui/memView");
 const callStackView_1 = require("./ui/callStackView");
 const disasmView_1 = require("./ui/disasmView");
@@ -135,6 +136,7 @@ function init(context) {
         periph.setIntervalMs(settings.debugRefreshMs);
         watch.setIntervalMs(settings.debugRefreshMs);
         chart.setIntervalMs();
+        arrayv.setIntervalMs();
         mem.setIntervalMs(settings.debugRefreshMs);
         refresh();
     }));
@@ -1099,6 +1101,14 @@ function init(context) {
         forceSample: () => watchRef?.forceSample(),
         onReady: () => watchRef?.syncChart(),
     });
+    // 数组面板：二维及以上标量数组的矩阵可视化（独立于波形，自行 readMemory 采样）
+    const arrayv = new arrayView_1.ArrayViewProvider({
+        memento: context.workspaceState,
+        getSession: () => engineSession,
+        log,
+        getInterval: () => settings.debugRefreshMs,
+        onReady: () => watchRef?.syncChart(),
+    });
     const watch = new watchView_1.WatchViewProvider({
         getSession: () => engineSession,
         log,
@@ -1133,7 +1143,10 @@ function init(context) {
             return (0, path_1.existsSync)(re) ? re : undefined;
         },
         getInterval: () => settings.debugRefreshMs,
-        onEntries: (list) => chart.setEntries(list),
+        onEntries: (list) => {
+            chart.setEntries(list);
+            arrayv.setEntries(list);
+        },
         onSample: (t, vals) => {
             chart.pushSample(t, vals);
         },
@@ -1178,6 +1191,8 @@ function init(context) {
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(watchView_1.WatchViewProvider.viewType, watch, {
         webviewOptions: { retainContextWhenHidden: true },
     }), vscode.window.registerWebviewViewProvider(chartView_1.ChartViewProvider.viewType, chart, {
+        webviewOptions: { retainContextWhenHidden: true },
+    }), vscode.window.registerWebviewViewProvider(arrayView_1.ArrayViewProvider.viewType, arrayv, {
         webviewOptions: { retainContextWhenHidden: true },
     }), vscode.window.registerWebviewViewProvider(memView_1.MemViewProvider.viewType, mem, {
         webviewOptions: { retainContextWhenHidden: true },
@@ -1227,30 +1242,34 @@ function init(context) {
         const ln = line + 1;
         disasmFollowTimer = setTimeout(() => disasm.onEditorCursor(file, ln), 150);
     }));
-    // 「已编译进固件」标注（设置 showCompiledMark 可关）：C/C++ 编辑器打开/激活时
-    // 淡绿底标出有指令的源码行；关闭时清除已有标注
+    // 「已编译进固件」绿点标注（始终开启）：C/C++ 编辑器打开/激活时行尾标出有指令的源码行
     const isCFile = (doc) => /^(c|cpp)$/.test(doc.languageId) || /\.(c|h|cpp|hpp)$/i.test(doc.fileName);
     const decorate = (ed) => {
-        if (!ed || !isCFile(ed.document)) {
-            return;
+        if (ed && isCFile(ed.document)) {
+            void disasm.decorateEditor(ed);
         }
-        if (!settings.showCompiledMark) {
-            disasm.clearCompiledMark(ed);
-            return;
-        }
-        void disasm.decorateEditor(ed);
     };
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(decorate), vscode.workspace.onDidOpenTextDocument((doc) => {
         const ed = vscode.window.visibleTextEditors.find((e) => e.document === doc);
         if (ed && isCFile(doc)) {
             decorate(ed);
         }
-    }), (0, settings_1.onSettingsChange)(() => {
-        // 开关切换即时生效：重标或清除所有可见 C/C++ 编辑器
-        for (const ed of vscode.window.visibleTextEditors) {
-            decorate(ed);
-        }
-    }));
+    }), 
+    // ELF 重建（覆盖所有构建路径，含手动 ninja）→ 重解析目录并重标全部可见 C/C++
+    // 编辑器，免除“编译完要切一下文件才显示”
+    (() => {
+        const w = vscode.workspace.createFileSystemWatcher('**/*.elf');
+        let timer;
+        const kick = () => {
+            if (timer) {
+                clearTimeout(timer);
+            }
+            timer = setTimeout(() => disasm.onElfRebuilt(), 300);
+        };
+        w.onDidChange(kick);
+        w.onDidCreate(kick);
+        return w;
+    })());
     if (vscode.window.activeTextEditor) {
         decorate(vscode.window.activeTextEditor);
     }

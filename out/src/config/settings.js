@@ -72,7 +72,6 @@ function loadSettings() {
         resetAfterFlash: reset === 'software' || reset === 'none' ? reset : 'hardware',
         binFlashAddress: cfg.get('binFlashAddress', ''),
         verboseLogging: cfg.get('verboseLogging', false),
-        showCompiledMark: cfg.get('showCompiledMark', true),
         buildTimeoutSec: clampNumber(cfg.get('buildTimeoutSec', 600), 10, 7200, 600),
         flashTimeoutSec: clampNumber(cfg.get('flashTimeoutSec', 300), 10, 3600, 300),
     };

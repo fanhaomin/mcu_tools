@@ -348,9 +348,8 @@ export class PeriphViewProvider implements vscode.WebviewViewProvider {
       @keyframes chgflash { from { background: color-mix(in srgb, var(--ac) 32%, transparent); }
         to { background: transparent; } }
       .ri .v.chg { animation: chgflash .8s ease-out; }
-      .card { border: 1px solid var(--dim); border-radius: 10px; padding: 14px 16px;
-              background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
-              margin-bottom: 12px; }
+      .card { padding: 2px 0 0; margin-bottom: 14px; }
+      .card + .card { border-top: 1px solid var(--dim); padding-top: 12px; }
       .card h3 { margin: 0; font-size: 16px; }
       .badge { font-size: 10px; padding: 2px 8px; border-radius: 9px;
                background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);

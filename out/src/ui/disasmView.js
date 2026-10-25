@@ -64,8 +64,10 @@ class DisasmViewProvider {
     getCompiledDeco() {
         if (!this.compiledDeco) {
             this.compiledDeco = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(78,201,148,0.07)',
+                // 行尾绿点（isWholeLine 使 after 附着到整行末尾，跟随代码宽度；
+                // 不占 gutter、不与断点冲突、不再整行铺绿底）
                 isWholeLine: true,
+                after: { contentText: '●', color: 'rgba(78,201,148,.6)', margin: '0 0 0 10px' },
             });
         }
         return this.compiledDeco;
@@ -237,9 +239,9 @@ class DisasmViewProvider {
         if (!cache || !cat || cat.insns.length === 0) {
             return;
         }
-        const elfKey = cache.elf;
-        // 行集合缓存：同文件同 ELF 不重算 objdump 归属（重放装饰仍照常执行——
-        // VS Code 在编辑器隐藏时会丢弃装饰，切回必须重放，否则绿底消失）
+        const elfKey = cache.elf + '|' + cache.mtimeMs;
+        // 行集合缓存：同文件同 ELF（含 mtime，重编译后必然重算）不重复归属计算
+        // （重放装饰仍照常执行——VS Code 在编辑器隐藏时会丢弃装饰，切回必须重放）
         let lines;
         const cacheKey = file + '|' + elfKey;
         if (this.lastDecorated?.key === cacheKey) {
@@ -265,11 +267,21 @@ class DisasmViewProvider {
             editor.setDecorations(deco, ranges);
         }
     }
-    /** 关闭标注：清除该编辑器的「已编译」底色 */
-    clearCompiledMark(editor) {
-        if (this.compiledDeco) {
-            editor.setDecorations(this.compiledDeco, []);
+    /** 重标所有可见 C/C++ 编辑器（ELF 重建/目录首次就绪后调用，免切文件） */
+    decorateVisible() {
+        for (const ed of vscode.window.visibleTextEditors) {
+            if (/^(c|cpp)$/.test(ed.document.languageId) ||
+                /\.(c|h|cpp|hpp)$/i.test(ed.document.uri.fsPath)) {
+                void this.decorateEditor(ed);
+            }
         }
+    }
+    /** ELF 重建（编译完成，来自文件监视）：目录按 mtime 自动重解析，重标全部可见编辑器 */
+    onElfRebuilt() {
+        void (async () => {
+            await this.ensureCatalog();
+            this.decorateVisible();
+        })();
     }
     /** 停机刷新：栈顶 PC 定位（PC 蓝 + ▶） */
     async refreshAtHalt(tries = 0) {
@@ -406,11 +418,8 @@ class DisasmViewProvider {
                 const cat = (0, disasm_1.parseObjdumpDisasm)(r.stdout ?? '');
                 this.cache = { elf, mtimeMs, cat };
                 this.deps.log(`反汇编: 已解析 ${cat.insns.length} 条指令 / ${cat.fns.length} 个函数`);
-                // 解析完成时目录从无到有：补一次当前 C/C++ 编辑器的「已编译」标注
-                const ed = vscode.window.activeTextEditor;
-                if (ed && /^(c|cpp)$/.test(ed.document.languageId)) {
-                    void this.decorateEditor(ed);
-                }
+                // 解析完成（首次/新 ELF）：重标所有可见 C/C++ 编辑器
+                this.decorateVisible();
             }
             catch (e) {
                 this.deps.log(`反汇编: objdump 解析失败 — ${e instanceof Error ? e.message : String(e)}`);
@@ -446,7 +455,7 @@ class DisasmViewProvider {
         return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
       body { font-family: var(--vscode-font-family); font-size: 12px;
              color: var(--vscode-foreground); background: var(--vscode-sideBar-background);
-             margin: 0; padding: 8px 10px 12px; height: 100vh; box-sizing: border-box;
+             margin: 0; padding: 6px 10px 0; height: 100vh; box-sizing: border-box;
              display: flex; flex-direction: column; }
       :root {
         --sel: rgba(88,182,248,.26); --selBar: #58b6f8;
@@ -470,16 +479,7 @@ class DisasmViewProvider {
       .st { margin-left: auto; display: flex; align-items: center; gap: 5px; }
       .st .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
       .st.hl .dot { background: #4ec994; box-shadow: 0 0 6px rgba(78,201,148,.7); }
-      .wrap { flex: 1; min-height: 0;
-        border: 1px solid var(--dim); border-radius: 10px; overflow: hidden;
-        display: flex; flex-direction: column;
-        background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 72%, var(--vscode-sideBar-background)); }
-      .cap { flex: none; font-size: 10px; font-weight: 600; text-transform: uppercase;
-        letter-spacing: .07em; padding: 5px 12px;
-        color: var(--vscode-descriptionForeground);
-        background: var(--vscode-sideBar-background); border-bottom: 1px solid var(--dim);
-        display: flex; justify-content: space-between; }
-      #asmPane { flex: 1; overflow: auto; padding: 4px 0 14px; }
+      #asmPane { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 12px; }
       .frow { display: flex; align-items: center; gap: 8px; margin: 12px 10px 4px;
         font-family: var(--vscode-editor-font-family, monospace); font-size: 12px;
         font-weight: 700; color: var(--lb);
@@ -514,10 +514,6 @@ class DisasmViewProvider {
       .im { color: var(--im); }
       .cm { color: var(--cm); font-style: italic; }
       .lb { color: var(--lb); }
-      .hint { flex: none; font-size: 10.5px; color: var(--vscode-descriptionForeground);
-        padding: 5px 2px 0; display: flex; gap: 14px; flex-wrap: wrap; }
-      .hint .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
-        vertical-align: -1px; margin-right: 5px; }
       .empty { padding: 24px 6px; color: var(--vscode-descriptionForeground);
         text-align: center; line-height: 1.9; }
       .nosess { position: fixed; inset: 0; z-index: 5; display: none;
@@ -527,24 +523,11 @@ class DisasmViewProvider {
       .nosess.show { display: flex; }
     </style></head><body>
       <div class="bar">
-        <span id="fn"></span><span id="loc"></span>
+        <span id="fn"></span><span id="loc"></span><span id="cnt"></span>
         <span class="st" id="st"><span class="dot"></span><span id="stt">运行中</span></span>
       </div>
-      <div class="wrap">
-        <div class="cap"><span>汇编</span><span id="cnt"></span></div>
-        <div id="asmPane">
-          <div id="asmBody" class="empty">停机自动定位到 PC；编辑器里点任意代码行自动联动<br>编辑器右键「在反汇编中显示此行」也可；滚到顶/底加载更多</div>
-        </div>
-      </div>
-      <div class="hint">
-        <span><span class="sw" style="background:var(--sel)"></span>联动行</span>
-        <span><span class="sw" style="background:var(--pc)"></span>当前 PC</span>
-        <span><span class="mn branch">分支</span></span>
-        <span><span class="mn mem">访存</span></span>
-        <span><span class="mn alu">算术</span></span>
-        <span><span class="mn fpu">浮点</span></span>
-        <span><span class="rg">寄存器</span></span>
-        <span><span class="im">立即数</span></span>
+      <div id="asmPane">
+        <div id="asmBody" class="empty">停机自动定位到 PC；编辑器里点任意代码行自动联动<br>编辑器右键「在反汇编中显示此行」也可；滚到顶/底加载更多</div>
       </div>
       <div class="nosess" id="nosess">未在调试中<br>编辑器右键「在反汇编中显示此行」也可浏览</div>
       <script>

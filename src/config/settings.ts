@@ -28,8 +28,6 @@ export interface AutoCmakeFlashSettings {
   resetAfterFlash: 'hardware' | 'software' | 'none';
   binFlashAddress: string;
   verboseLogging: boolean;
-  /** 编辑器淡绿底标注已编译进固件的源码行 */
-  showCompiledMark: boolean;
   buildTimeoutSec: number;
   flashTimeoutSec: number;
 }
@@ -69,7 +67,6 @@ export function loadSettings(): AutoCmakeFlashSettings {
       reset === 'software' || reset === 'none' ? reset : ('hardware' as const),
     binFlashAddress: cfg.get<string>('binFlashAddress', ''),
     verboseLogging: cfg.get<boolean>('verboseLogging', false),
-    showCompiledMark: cfg.get<boolean>('showCompiledMark', true),
     buildTimeoutSec: clampNumber(cfg.get<number>('buildTimeoutSec', 600), 10, 7200, 600),
     flashTimeoutSec: clampNumber(cfg.get<number>('flashTimeoutSec', 300), 10, 3600, 300),
   };

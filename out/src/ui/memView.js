@@ -165,8 +165,20 @@ class MemViewProvider {
         background: var(--vscode-input-background); color: var(--vscode-input-foreground);
         font-family: var(--vscode-editor-font-family, monospace); }
       #addr:focus { outline: none; border-color: var(--ac); }
-      .card { position: relative; border: 1px solid rgba(128,128,128,.25); border-radius: 8px;
-        background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent); overflow: hidden; }
+      /* 自绘历史下拉（原生 datalist 弹层不受主题控制，白底突兀） */
+      .addrwrap { position: relative; flex: 1; min-width: 0; }
+      .addrwrap #addr { width: 100%; box-sizing: border-box; }
+      .hist { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 20;
+        display: none; overflow: hidden; border-radius: 6px;
+        border: 1px solid var(--vscode-input-border, rgba(128,128,128,.35));
+        background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+        box-shadow: 0 5px 14px rgba(0,0,0,.4); }
+      .hist.show { display: block; }
+      .hist div { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px;
+        padding: 4px 10px; cursor: pointer; }
+      .hist div:hover, .hist div.on { background: color-mix(in srgb, var(--ac) 18%, transparent);
+        color: var(--ac); }
+      .card { position: relative; }
       .nosess { position: absolute; inset: 0; z-index: 5; display: none;
         align-items: center; justify-content: center; text-align: center;
         background: color-mix(in srgb, var(--vscode-sideBar-background) 86%, transparent);
@@ -222,8 +234,10 @@ class MemViewProvider {
         background: color-mix(in srgb, #f14c4c 12%, var(--vscode-sideBar-background)); }
     </style></head><body>
       <div class="row">
-        <input id="addr" type="text" list="hist" placeholder="0x20000000（回车跳转）">
-        <datalist id="hist"></datalist>
+        <div class="addrwrap">
+          <input id="addr" type="text" placeholder="0x20000000（回车跳转）">
+          <div id="hist" class="hist"></div>
+        </div>
       </div>
       <div class="card" id="card">
         <div class="head"><span class="a" id="base">—</span><span class="n">256 B · 实时</span></div>
@@ -332,7 +346,28 @@ class MemViewProvider {
 
         function renderHist() {
           $('hist').innerHTML = state.history.map((h) =>
-            '<option value="0x' + h.toString(16).toUpperCase() + '">').join('');
+            '<div data-v="' + h + '">0x' + h.toString(16).toUpperCase() + '</div>').join('');
+          $('hist').classList.remove('show');
+        }
+        let histSel = -1;
+        function histFilter() {
+          const q = $('addr').value.trim().toLowerCase().replace(/^0x/, '');
+          const el = $('hist');
+          let n = 0;
+          el.querySelectorAll('div').forEach((d) => {
+            const show = !q || d.textContent.toLowerCase().includes(q);
+            d.style.display = show ? '' : 'none';
+            if (show) n++;
+          });
+          histSel = -1;
+          el.classList.toggle('show', n > 0);
+        }
+        function histPick(d) {
+          const v = parseInt(d.getAttribute('data-v'), 10);
+          $('addr').value = '0x' + v.toString(16).toUpperCase();
+          $('hist').classList.remove('show');
+          post({ cmd: 'base', base: v });
+          jump(v);
         }
 
         function jump(base) {
@@ -369,19 +404,47 @@ class MemViewProvider {
           }
         });
 
-        // 回车 / 下拉历史选择 → 跳转（host 记历史）
+        // 历史下拉：聚焦显示/输入过滤/↑↓选择/Enter 跳转，点击条目直接跳（host 记历史）
+        $('addr').addEventListener('focus', histFilter);
+        $('addr').addEventListener('input', histFilter);
+        $('addr').addEventListener('blur', () =>
+          setTimeout(() => $('hist').classList.remove('show'), 120));
+        $('hist').addEventListener('mousedown', (ev) => {
+          const d = ev.target instanceof Element ? ev.target.closest('div[data-v]') : null;
+          if (!d) return;
+          ev.preventDefault(); // 不让输入框失焦，选中逻辑走 histPick
+          histPick(d);
+        });
         $('addr').addEventListener('keydown', (ev) => {
+          const el = $('hist');
+          const vis = [...el.querySelectorAll('div')].filter((d) => d.style.display !== 'none');
+          if (ev.key === 'Escape') { el.classList.remove('show'); return; }
+          if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+            if (!vis.length) return;
+            ev.preventDefault();
+            histSel = ev.key === 'ArrowDown' ? Math.min(vis.length - 1, histSel + 1)
+              : Math.max(0, histSel - 1);
+            vis.forEach((d, i) => d.classList.toggle('on', i === histSel));
+            vis[histSel].scrollIntoView({ block: 'nearest' });
+            return;
+          }
           if (ev.key !== 'Enter') return;
+          if (el.classList.contains('show') && histSel >= 0 && vis[histSel]) {
+            histPick(vis[histSel]);
+            return;
+          }
           const v = parseInt($('addr').value, 16);
           if (!Number.isFinite(v)) return;
           post({ cmd: 'base', base: v });
           jump(v);
+          el.classList.remove('show');
         });
         $('addr').addEventListener('change', () => {
           const v = parseInt($('addr').value, 16);
           if (!Number.isFinite(v)) return;
           post({ cmd: 'base', base: v });
           jump(v);
+          $('hist').classList.remove('show');
         });
 
         // —— 滚动条：拖动快速跳转（以拖动起始地址为中心 ±32KB），点轨道翻页 ——
