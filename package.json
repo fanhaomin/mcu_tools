@@ -2,7 +2,7 @@
   "name": "auto-cmake-flash",
   "displayName": "Embedded Debug (STM32)",
   "description": "STM32 一体化插件：工程识别 · CMake 编译 · ST-LINK 烧录 · 在线调试 · 实时监控",
-  "version": "0.9.131",
+  "version": "0.9.132",
   "publisher": "acflash",
   "license": "MIT",
   "private": true,
@@ -479,7 +479,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
     "test": "npm run compile && node --test \"out/test/**/*.test.js\"",
-    "package": "vsce package --allow-missing-repository --no-dependencies"
+    "package": "vsce package --no-rewrite-relative-links --allow-missing-repository --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",

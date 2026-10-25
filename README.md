@@ -33,6 +33,32 @@ code --install-extension auto-cmake-flash-<版本>.vsix
 5. **烧录**：连接 ST-LINK → 点 **编译并烧录** → 弹出确认窗口（工程 / MCU / 探头 / 固件信息）核对无误 → **确认烧录**。
 6. **调试**：点 **编译并调试**，自动停在 `main`；底栏出现「**调试器**」面板（不开调试时隐藏）。
 
+## 界面一览
+
+**工程与环境（活动栏侧边栏）**——扫描工程、检测环境、编译、烧录、调试、配置的统一入口。
+
+![工程与环境面板](resources/screenshots/sidebar.jpg)
+
+**变量监控 + 波形**——表达式直接添加变量；曲线滚轮缩放、拖动平移、悬停读值。
+
+![变量监控与波形](resources/screenshots/chart-watch.jpg)
+
+**数组**——二维以上数组矩阵铺开，每格显示数值，多维按切片全部展开。
+
+![数组矩阵](resources/screenshots/array.jpg)
+
+**外设寄存器**——寄存器实时刷新，位域图点击翻转写入，GPIO 外设附 LED 点灯面板。
+
+![外设寄存器](resources/screenshots/periph.jpg)
+
+**内存视图**——按地址实时查看内存，点击字节格直接改写。
+
+![内存视图](resources/screenshots/memview.jpg)
+
+**调用栈 + 反汇编**——停机自动定位当前指令，点汇编行跳回对应源码。
+
+![调用栈与反汇编](resources/screenshots/callstack-disasm.jpg)
+
 ## 调试面板怎么用
 
 ### 变量监控
