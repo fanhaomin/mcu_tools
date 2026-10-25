@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.129] - 2026-10-25
+
+### Changed — 图标换对称金色引脚芯片
+- 活动栏 / 底栏容器 / 扩展列表大图标统一换为对称金色引脚芯片图（原图 1254×1254 缩至 256×256，约 97KB）。
+
 ## [0.9.128] - 2026-10-25
 
 ### Changed — 图标换回 icons8 彩色芯片（弃灰款扁平图）
