@@ -1,6 +1,6 @@
-# Embedded Debug (STM32)
+# Embedded Debug
 
-STM32 一体化插件：工程识别 · CMake 编译 · ST-LINK 烧录 · 在线调试 · 实时监控。
+工程识别 · CMake 编译 · ST-LINK 烧录 · 在线调试 · 实时监控（目前仅支持 STM32）。
 
 > 原「Auto CMake Flash」——扩展标识不变，老版本直接升级，设置与数据无需迁移。
 

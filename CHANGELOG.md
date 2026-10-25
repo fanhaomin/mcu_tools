@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.133] - 2026-10-25
+
+### Changed — 名称去掉 STM32 后缀，支持范围移入描述
+- displayName：`Embedded Debug (STM32)` → `Embedded Debug`；描述末尾标注「目前仅支持 STM32」。扩展标识（acflash.auto-cmake-flash）不变，升级不受影响，README 标题同步。
+
+## [0.9.132] - 2026-10-25
+
+### Added — 扩展详情页加入 6 张界面截图
+- README 新增「界面一览」节：侧边栏总览 / 变量监控+波形 / 数组矩阵 / 外设寄存器 / 内存视图 / 调用栈+反汇编（1400px JPEG，共约 1MB）。
+- 打包命令加 `--no-rewrite-relative-links`：vsce 3.x 强制 README 图片走 https 绝对地址，关闭相对链接改写后本地截图随包分发、详情页正常显示。
+
+## [0.9.131] - 2026-10-25
+
+### Changed — 扩展面板不再显示「更改日志」标签
+- `CHANGELOG.md` 加入 `.vscodeignore` 不打进 vsix（仓库内保留维护）。
+
 ## [0.9.130] - 2026-10-25
 
 ### Changed — 图标换翡翠绿四边引脚芯片
