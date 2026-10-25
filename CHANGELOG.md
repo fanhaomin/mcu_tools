@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.124] - 2026-10-25
+
+### Changed — 扩展描述重写（一句话结构化）
+- 旧描述一句塞了五个功能还带两段括号补注，扩展列表里显示冗长——改为 `STM32 一体化插件：工程识别 · CMake 编译 · ST-LINK 烧录 · 在线调试 · 实时监控`。「原 Auto CMake Flash」沿革说明保留在 README 开头。
+
 ## [0.9.123] - 2026-10-25
 
 ### Changed — 活动栏/底栏容器图标换芯片图标（PNG）
