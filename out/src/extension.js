@@ -1082,6 +1082,13 @@ function init(context) {
     let engineSession;
     /** 活跃的引擎会话（启动新调试前清理，避免同名会话堆积） */
     const liveSessions = new Set();
+    // 「调试器」底栏容器显隐：无引擎调试会话时整体隐藏（when=acf.debugActive
+    // 挂在全部六个调试视图上，容器内无可见视图时 VS Code 会隐藏整个标签）
+    const setDebugPanelsVisible = (on) => {
+        void vscode.commands.executeCommand('setContext', 'acf.debugActive', on);
+    };
+    // 窗口重载落在调试中途的场景：激活时就有活跃会话 → 立即显示
+    setDebugPanelsVisible(!!vscode.debug.activeDebugSession);
     const periph = new periphView_1.PeriphViewProvider({
         getSvd: () => (svdCache ? { device: svdCache.device, file: svdCache.file } : undefined),
         getSvdStatus: () => periphStatus,
@@ -1286,6 +1293,7 @@ function init(context) {
         if (isEngineSession(s)) {
             engineSession = s;
             liveSessions.add(s);
+            setDebugPanelsVisible(true);
             periph.pushSession();
             void refreshPeripheralSvd();
             // 开调试即反汇编定位：attach 接管时目标处于停机态（烧录后复位停机），
@@ -1299,6 +1307,7 @@ function init(context) {
         if (engineSession && engineSession.id === s.id) {
             engineSession = undefined;
         }
+        setDebugPanelsVisible(liveSessions.size > 0);
         periph.pushSession();
         // 引擎回收子进程需要一点时间；延迟清理孤儿（期间新会话已启动则自动跳过）
         setTimeout(() => void (0, probeCleanup_1.killOrphanProbeHolders)('调试会话结束', log), 1500);
